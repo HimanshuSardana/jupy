@@ -22,6 +22,11 @@ type Config struct {
 	Open      func(kaggle.Kernel) (*notebook.Notebook, kaggle.Kernel, error)
 	More      func() ([]kaggle.Kernel, error)
 	Push      func(kaggle.Kernel, []byte) (int, error)
+
+	// StartSession starts an interactive session for a notebook on the given
+	// machine shape and returns the Jupyter URLs to try, best first.
+	StartSession func(kaggle.Kernel, string) (kaggle.StartedSession, error)
+	StopSession  func(id int) error
 }
 
 type focus int
@@ -32,7 +37,7 @@ const (
 )
 
 const (
-	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  P push  c connect  q quit"
+	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  P push  c session  C url  x stop  q quit"
 	minWidth  = 60
 	minHeight = 14
 )
@@ -63,6 +68,7 @@ type app struct {
 	selMove bool
 
 	jup       *session
+	sessionID int
 	running   int
 	runCancel context.CancelFunc
 	events    chan execEvent
@@ -181,6 +187,10 @@ func (a *app) handle(ch goncurses.Key) bool {
 		a.deleteCell()
 	case 'c':
 		a.connect()
+	case 'C':
+		a.connectByURL()
+	case 'x':
+		a.stopSession()
 	case 'r':
 		a.reload()
 	case 'n':

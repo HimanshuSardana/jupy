@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/himanshusardana/jupy/internal/kaggle"
 	"github.com/himanshusardana/jupy/internal/notebook"
@@ -93,6 +95,26 @@ func remoteConfig(user string, pageSize int) (ui.Config, error) {
 		},
 		Push: func(meta kaggle.Kernel, text []byte) (int, error) {
 			return client.SaveKernel(meta, text, "QUICK_SAVE")
+		},
+		StartSession: func(meta kaggle.Kernel, shape string) (kaggle.StartedSession, error) {
+			internet := meta.Internet
+			// the session API wants owner/slug, not the bare slug
+			slug := meta.Ref
+			if slug == "" {
+				slug = meta.Owner + "/" + meta.Slug
+			}
+			return client.StartSession(context.Background(), kaggle.SessionRequest{
+				Slug:         slug,
+				Language:     meta.Language,
+				KernelType:   meta.Type,
+				MachineShape: shape,
+				DockerImage:  meta.Docker,
+				Internet:     &internet,
+				Timeout:      3 * time.Minute,
+			})
+		},
+		StopSession: func(id int) error {
+			return client.CancelSession(id)
 		},
 	}
 	if next != "" {

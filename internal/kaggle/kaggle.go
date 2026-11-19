@@ -2,6 +2,7 @@ package kaggle
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -226,13 +227,19 @@ func join(values []string) string {
 }
 
 func (c *Client) call(method string, body, out any) error {
+	return c.callCtx(context.Background(), "kernels.KernelsApiService", method, body, out)
+}
+
+// callCtx posts a JSON body to a service method; service is e.g.
+// "kernels.KernelsApiService".
+func (c *Client) callCtx(ctx context.Context, service, method string, body, out any) error {
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
 
-	url := c.BaseURL + "/v1/kernels.KernelsApiService/" + method
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+	target := c.BaseURL + "/v1/" + service + "/" + method
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}

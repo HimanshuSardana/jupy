@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/himanshusardana/jupy/internal/highlight"
 	"github.com/himanshusardana/jupy/internal/jupyter"
+	"github.com/himanshusardana/jupy/internal/kaggle"
 	"github.com/himanshusardana/jupy/internal/notebook"
 )
 
@@ -37,8 +39,47 @@ type execEvent struct {
 	err   error
 }
 
-// connect prompts for a Kaggle Jupyter server URL and attaches to its kernel.
+// connect starts a Kaggle session for the open notebook on the accelerator the
+// user picks, then attaches to its kernel. C is the fallback that takes a URL.
 func (a *app) connect() {
+	if a.cfg.StartSession == nil {
+		a.connectByURL()
+		return
+	}
+	if a.nb == nil {
+		a.status = "open a notebook first"
+		return
+	}
+	if a.curMeta.Slug == "" {
+		a.status = "starting a session needs a kaggle notebook, not a local file"
+		return
+	}
+
+	acc, ok := a.pickAccelerator()
+	if !ok {
+		a.status = "connect cancelled"
+		return
+	}
+
+	a.status = fmt.Sprintf("starting a %s session for %s ...", acc.Label, a.curMeta.Slug)
+	a.draw()
+
+	started, err := a.cfg.StartSession(a.curMeta, acc.Shape)
+	switch {
+	case errors.Is(err, kaggle.ErrSessionRunning):
+		a.status = "a session is already running - press C to paste its url (Run > Kaggle Jupyter Server)"
+		return
+	case err != nil:
+		a.status = err.Error()
+		return
+	}
+
+	a.sessionID = started.SessionID
+	a.attachFirst(started.URLs)
+}
+
+// connectByURL takes a Jupyter server URL pasted by the user.
+func (a *app) connectByURL() {
 	url, ok := a.prompt(" jupyter session url: ")
 	if !ok {
 		a.status = "connect cancelled"
@@ -48,6 +89,115 @@ func (a *app) connect() {
 		return
 	}
 	a.attach(url)
+}
+
+// attachFirst tries the URLs an operation reported until one answers.
+func (a *app) attachFirst(urls []string) {
+	if len(urls) == 0 {
+		a.status = "no jupyter url to connect to"
+		return
+	}
+	var errs []string
+	for _, raw := range urls {
+		if err := a.tryAttach(raw); err != nil {
+			errs = append(errs, err.Error())
+			continue
+		}
+		return
+	}
+	a.status = "could not attach: " + errs[0]
+}
+
+func (a *app) tryAttach(raw string) error {
+	sess, err := jupyter.Parse(raw)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	kernels, err := sess.Kernels(ctx)
+	if err != nil {
+		return err
+	}
+	var kernel jupyter.Kernel
+	if len(kernels) > 0 {
+		kernel = kernels[0]
+	} else if kernel, err = sess.StartKernel(ctx, "python3"); err != nil {
+		return err
+	}
+	a.jup = &session{client: sess, kernel: kernel}
+	a.status = "connected to " + sess.Host()
+	a.probeAccelerator()
+	return nil
+}
+
+// pickAccelerator asks which machine shape to start the session on.
+func (a *app) pickAccelerator() (kaggle.Accelerator, bool) {
+	options := kaggle.Accelerators
+	sel := 1
+	if len(options) < 2 {
+		sel = 0
+	}
+	for i, acc := range options {
+		if a.curMeta.Machine != "" && acc.Shape == a.curMeta.Machine {
+			sel = i
+		}
+	}
+
+	for {
+		a.drawAccelerators(options, sel)
+		ch := a.scr.GetChar()
+		switch ch {
+		case 'j', goncurses.KEY_DOWN:
+			sel = clampIndex(sel+1, len(options))
+			continue
+		case 'k', goncurses.KEY_UP:
+			sel = clampIndex(sel-1, len(options))
+			continue
+		case '\r', '\n', goncurses.KEY_ENTER:
+			return options[sel], true
+		case 27, 'q', 3:
+			return kaggle.Accelerator{}, false
+		}
+	}
+}
+
+func (a *app) drawAccelerators(options []kaggle.Accelerator, sel int) {
+	l := a.layout()
+	a.draw()
+
+	height := len(options) + 3
+	y := clamp((l.h-height)/2, 0, max(l.h-height, 0))
+
+	// a full-width band, so nothing shows through beside the options
+	for row := y; row < y+height; row++ {
+		a.put(row, 0, l.w, "", a.th.plain, true)
+	}
+
+	a.scr.AttrSet(a.th.border)
+	for col := 0; col < l.w-1; col++ {
+		a.scr.MoveAddChar(y, col, goncurses.ACS_HLINE)
+	}
+	a.scr.AttrSet(goncurses.A_NORMAL)
+
+	title := " start a session"
+	if a.curMeta.Slug != "" {
+		title = " start a session for " + a.curMeta.Slug + " "
+	}
+	a.put(y, 2, l.w-4, title, a.th.label, false)
+	a.put(y+1, 2, l.w-4, " accelerator", a.th.dim, false)
+
+	for i, acc := range options {
+		attr, mark := a.th.plain, "  "
+		if i == sel {
+			attr, mark = a.th.sel, "> "
+		}
+		a.put(y+2+i, 2, l.w-4, mark+acc.Label, attr, false)
+	}
+
+	a.put(y+height-1, 2, l.w-4, " enter start    esc cancel    C paste a url instead", a.th.dim, false)
+	a.scr.Refresh()
 }
 
 // attach connects to a session URL without prompting (also used at startup).
@@ -262,6 +412,25 @@ func (a *app) prompt(label string) (string, bool) {
 			}
 		}
 	}
+}
+
+// stopSession cancels a session jupy started, so it stops using quota.
+func (a *app) stopSession() {
+	if a.cfg.StopSession == nil {
+		a.status = "stopping sessions is not available"
+		return
+	}
+	if a.sessionID == 0 {
+		a.status = "this session was not started by jupy - stop it on kaggle.com"
+		return
+	}
+	if err := a.cfg.StopSession(a.sessionID); err != nil {
+		a.status = err.Error()
+		return
+	}
+	a.status = fmt.Sprintf("stopped session %d", a.sessionID)
+	a.sessionID = 0
+	a.jup = nil
 }
 
 // push saves the buffer to Kaggle as a new version without running it.
