@@ -27,6 +27,9 @@ type Config struct {
 	// machine shape and returns the Jupyter URLs to try, best first.
 	StartSession func(kaggle.Kernel, string) (kaggle.StartedSession, error)
 	StopSession  func(id int) error
+
+	// CreateNotebook creates a private notebook and returns it.
+	CreateNotebook func(title string) (kaggle.Kernel, error)
 }
 
 type focus int
@@ -74,10 +77,11 @@ type app struct {
 	events    chan execEvent
 	outputs   map[int][]jupyter.Event
 
-	where     focus
-	status    string
-	th        theme
-	needsDraw bool
+	where         focus
+	status        string
+	quitRequested bool
+	th            theme
+	needsDraw     bool
 
 	// ClearOk is forced when content shifts or an external program has
 	// scribbled on the terminal, so ncurses never patches a stale model.
@@ -149,7 +153,19 @@ func (a *app) loop() error {
 	}
 }
 
+const (
+	keyEscape = 27
+	keyCtrlP  = 16
+	keyCtrlN  = 14
+	keyCtrlU  = 21
+	keyCtrlC  = 3
+)
+
 func (a *app) handle(ch goncurses.Key) bool {
+	if ch == keyCtrlP {
+		a.palette()
+		return a.quitRequested
+	}
 	switch ch {
 	case 'q', 3:
 		return true
@@ -296,6 +312,35 @@ func (a *app) applyOutputs() {
 			continue
 		}
 		a.nb.SetCellOutputs(i, ipynbOutputs(outs))
+	}
+}
+
+// newNotebook asks for a title, creates the notebook on Kaggle and opens it.
+func (a *app) newNotebook() {
+	if a.cfg.CreateNotebook == nil {
+		a.status = "creating notebooks needs kaggle credentials"
+		return
+	}
+	title, ok := a.prompt(" new notebook title: ")
+	if !ok || strings.TrimSpace(title) == "" {
+		a.status = "new notebook cancelled"
+		return
+	}
+
+	a.status = "creating " + title + " ..."
+	a.draw()
+
+	k, err := a.cfg.CreateNotebook(title)
+	if err != nil {
+		a.status = "could not create " + title + ": " + err.Error()
+		return
+	}
+
+	a.nbs = append([]kaggle.Kernel{k}, a.nbs...)
+	a.nsel, a.noff = 0, 0
+	a.openSelectedNotebook()
+	if a.nb != nil {
+		a.status = "created " + k.Ref + " - a adds a cell, P pushes"
 	}
 }
 
@@ -467,14 +512,21 @@ type layout struct {
 	listRows, bodyRows int
 }
 
+const (
+	cardPadding = 2
+	cardGap     = 1
+)
+
 func (a *app) layout() layout {
 	h, w := a.scr.MaxYX()
 	listW := clamp(w/3, 26, 46)
+	bodyX, bodyW := listW+1, max(w-listW-2, 1)
+
 	return layout{
 		w: w, h: h,
 		boxTop: 1, boxBottom: h - 3,
 		listX: 0, listW: listW,
-		bodyX: listW + 1, bodyW: max(w-listW-2, 1),
+		bodyX: bodyX, bodyW: bodyW,
 		innerTop: 2, listRows: max(h-5, 1),
 		bodyTop: 1, bodyRows: max(h-3, 1),
 	}
@@ -579,14 +631,15 @@ func (a *app) drawNotebooks(l layout) {
 			break
 		}
 		k := a.nbs[idx]
-		attr, mark := a.th.plain, "  "
+		titleAttr, metaAttr := a.th.plain, a.th.dim
 		if idx == a.nsel && a.where == focusNotebooks {
-			attr, mark = a.th.sel, "> "
+			titleAttr, metaAttr = a.th.cursorLine, a.th.cursorLine
+			a.put(top+i, x, width, "", a.th.cursorLine, true)
 		}
 
-		a.put(top+i, x, width-11, mark+k.Title, attr, false)
+		a.put(top+i, x, width-11, " "+k.Title, titleAttr, false)
 		if t := k.LastRunTime(); !t.IsZero() {
-			a.put(top+i, x+width-10, 10, t.Format("2006-01-02"), a.th.dim, false)
+			a.put(top+i, x+width-10, 10, t.Format("2006-01-02"), metaAttr, false)
 		}
 	}
 }
@@ -665,7 +718,7 @@ func (a *app) drawCard(x, y, width int, c card, selected bool, clipTop, clipBott
 		if c.state != "" {
 			title = fmt.Sprintf(" %d %s - %s ", c.cell+1, c.tag, c.state)
 		}
-		a.put(y, x+2, width-4, title, label, false)
+		a.put(y, x+1+cardPadding, width-2-2*cardPadding, title, label, false)
 	}
 	if bottom >= clipTop && bottom <= clipBottom {
 		a.hline(bottom, x, width, border, goncurses.ACS_LLCORNER, goncurses.ACS_LRCORNER)
@@ -696,7 +749,7 @@ func (a *app) cardRow(row, x, width int, border goncurses.Char, spans []highligh
 	a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
 	a.scr.MoveAddChar(row, x+width-1, goncurses.ACS_VLINE)
 	a.scr.AttrSet(goncurses.A_NORMAL)
-	a.putSpans(row, x+2, width-4, spans)
+	a.putSpans(row, x+1+cardPadding, width-2-2*cardPadding, spans)
 }
 
 func (a *app) putSpans(y, x, width int, spans []highlight.Span) {

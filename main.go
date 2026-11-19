@@ -116,6 +116,9 @@ func remoteConfig(user string, pageSize int) (ui.Config, error) {
 		StopSession: func(id int) error {
 			return client.CancelSession(id)
 		},
+		CreateNotebook: func(title string) (kaggle.Kernel, error) {
+			return client.CreateNotebook(title)
+		},
 	}
 	if next != "" {
 		cfg.More = func() ([]kaggle.Kernel, error) {
