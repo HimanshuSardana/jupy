@@ -90,7 +90,7 @@ func (a *app) palette() {
 			}
 		case ch == goncurses.KEY_DOWN || ch == keyCtrlN:
 			sel = clampIndex(sel+1, len(matches))
-		case ch == goncurses.KEY_UP:
+		case ch == goncurses.KEY_UP || ch == keyCtrlP:
 			sel = clampIndex(sel-1, len(matches))
 		case ch == goncurses.KEY_BACKSPACE, ch == 127, ch == 8:
 			if len(query) == 0 {
