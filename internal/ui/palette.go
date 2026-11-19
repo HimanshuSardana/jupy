@@ -85,7 +85,7 @@ func (a *app) palette() {
 		case ch == '\r' || ch == '\n' || ch == goncurses.KEY_ENTER:
 			if len(matches) > 0 {
 				a.status = ""
-				matches[sel].run()
+				a.runFromPalette(matches[sel])
 				return
 			}
 		case ch == goncurses.KEY_DOWN || ch == keyCtrlN:
@@ -105,6 +105,14 @@ func (a *app) palette() {
 			sel = 0
 		}
 	}
+}
+
+// runFromPalette closes the overlay first: commands that prompt or draw their
+// own dialog would otherwise paint on top of a palette that is still on screen.
+func (a *app) runFromPalette(cmd command) {
+	a.draw()
+	a.scr.Refresh()
+	cmd.run()
 }
 
 func (a *app) drawPaletteFrame(x, y, width, height int) {
