@@ -10,6 +10,7 @@ import (
 
 	"github.com/himanshusardana/jupy/internal/highlight"
 	"github.com/himanshusardana/jupy/internal/jupyter"
+	"github.com/himanshusardana/jupy/internal/notebook"
 )
 
 const maxOutputLines = 400
@@ -261,6 +262,48 @@ func (a *app) prompt(label string) (string, bool) {
 			}
 		}
 	}
+}
+
+// push saves the buffer to Kaggle as a new version without running it.
+func (a *app) push() {
+	if a.nb == nil {
+		a.status = "nothing open"
+		return
+	}
+	if a.cfg.Push == nil {
+		a.status = "push needs kaggle credentials"
+		return
+	}
+	if a.curMeta.Slug == "" {
+		a.status = "push needs a kaggle notebook, not a local file"
+		return
+	}
+
+	doc, err := a.nb.Marshal()
+	if err != nil {
+		a.status = err.Error()
+		return
+	}
+	text, err := notebook.NormalizeForPush(doc)
+	if err != nil {
+		a.status = err.Error()
+		return
+	}
+
+	a.status = "pushing " + a.curMeta.Slug + " ..."
+	a.draw()
+
+	version, err := a.cfg.Push(a.curMeta, text)
+	if err != nil {
+		a.status = "push failed: " + err.Error()
+		return
+	}
+	for i := range a.nb.Cells {
+		a.nb.Cells[i].Edited = false
+	}
+	a.curMeta.Version = version
+	a.buildCards()
+	a.status = fmt.Sprintf("pushed version %d - reload the notebook on kaggle.com", version)
 }
 
 func (a *app) addCell(kind string) {

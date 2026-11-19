@@ -19,8 +19,9 @@ type Config struct {
 	User      string
 	Session   string
 	Notebooks []kaggle.Kernel
-	Open      func(kaggle.Kernel) (*notebook.Notebook, error)
+	Open      func(kaggle.Kernel) (*notebook.Notebook, kaggle.Kernel, error)
 	More      func() ([]kaggle.Kernel, error)
+	Push      func(kaggle.Kernel, []byte) (int, error)
 }
 
 type focus int
@@ -31,7 +32,7 @@ const (
 )
 
 const (
-	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  c connect  q quit"
+	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  P push  c connect  q quit"
 	minWidth  = 60
 	minHeight = 14
 )
@@ -55,6 +56,7 @@ type app struct {
 	noff int
 
 	nb      *notebook.Notebook
+	curMeta kaggle.Kernel
 	cards   []card
 	csel    int
 	ctop    int
@@ -185,6 +187,8 @@ func (a *app) handle(ch goncurses.Key) bool {
 		a.more()
 	case 'w':
 		a.save()
+	case 'P':
+		a.push()
 	}
 	return false
 }
@@ -243,11 +247,12 @@ func (a *app) openSelectedNotebook() {
 	a.status = "loading " + k.Ref + " ..."
 	a.draw()
 
-	nb, err := a.cfg.Open(k)
+	nb, meta, err := a.cfg.Open(k)
 	if err != nil {
 		a.status = err.Error()
 		return
 	}
+	a.curMeta = meta
 	if nb.Title == "" {
 		nb.Title = k.Title
 	}
@@ -693,8 +698,12 @@ func (a *app) drawStatus(l layout) {
 		a.put(l.h-2, l.w-2-len(right), l.w-2, right, a.th.dim, false)
 		msgWidth = l.w - 4 - len(right)
 	}
-	if a.status != "" {
-		a.put(l.h-2, 1, msgWidth, a.status, a.th.plain, false)
+	msg := a.status
+	if msg == "" && a.nb != nil && a.nb.Dirty() > 0 {
+		msg = fmt.Sprintf("%d cells edited - P pushes a version, w writes a local copy", a.nb.Dirty())
+	}
+	if msg != "" {
+		a.put(l.h-2, 1, msgWidth, msg, a.th.plain, false)
 	}
 	a.put(l.h-1, 1, l.w-2, helpLine, a.th.dim, false)
 }

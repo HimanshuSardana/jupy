@@ -54,8 +54,9 @@ func localConfig(paths []string) ui.Config {
 	}
 	return ui.Config{
 		Notebooks: kernels,
-		Open: func(k kaggle.Kernel) (*notebook.Notebook, error) {
-			return notebook.Load(k.Ref)
+		Open: func(k kaggle.Kernel) (*notebook.Notebook, kaggle.Kernel, error) {
+			nb, err := notebook.Load(k.Ref)
+			return nb, k, err
 		},
 	}
 }
@@ -75,7 +76,7 @@ func remoteConfig(user string, pageSize int) (ui.Config, error) {
 	cfg := ui.Config{
 		User:      creds.Username,
 		Notebooks: nbs,
-		Open: func(k kaggle.Kernel) (*notebook.Notebook, error) {
+		Open: func(k kaggle.Kernel) (*notebook.Notebook, kaggle.Kernel, error) {
 			owner := k.Owner
 			if owner == "" {
 				owner = user
@@ -85,9 +86,13 @@ func remoteConfig(user string, pageSize int) (ui.Config, error) {
 			}
 			meta, source, err := client.GetKernel(owner, k.Slug)
 			if err != nil {
-				return nil, err
+				return nil, kaggle.Kernel{}, err
 			}
-			return notebook.Parse(meta.Title, meta.Ref, source)
+			nb, err := notebook.Parse(meta.Title, meta.Ref, source)
+			return nb, meta, err
+		},
+		Push: func(meta kaggle.Kernel, text []byte) (int, error) {
+			return client.SaveKernel(meta, text, "QUICK_SAVE")
 		},
 	}
 	if next != "" {

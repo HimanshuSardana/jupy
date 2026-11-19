@@ -50,6 +50,7 @@ jupy notebook.ipynb [more...] # local files, no network
 | `r` | reload the open notebook |
 | `n` | load the next page of notebooks |
 | `w` | write the notebook (with your edits) to `./<slug>.ipynb` |
+| `P` | push the buffer to Kaggle as a new version (no run) |
 | `q` | quit |
 
 ## Credentials
@@ -88,6 +89,32 @@ working at that point.
 The URL embeds a session JWT. `jupy` keeps it in memory only — it is never
 written to disk, logged, or shown after the prompt — so treat it as a secret and
 do not paste it into anything you keep around.
+
+## What runs where
+
+- **Execution is remote.** `R` sends the cell source over the session's Jupyter
+  websocket; the kernel on Kaggle' s machine runs it and streams output back.
+  jupy never spawns a local interpreter.
+- **The document is local.** Cell text is pulled once through the Kaggle API,
+  then edited in memory. `a`/`m`/`d` change only that copy, `w` writes a local
+  `.ipynb`, and `P` is the only thing that writes back to Kaggle.
+- **The kernel is shared, the document is not.** Variables you create with `R`
+  exist in the same kernel the browser is attached to, but the browser's
+  notebook file comes from Kaggle's version store, so it keeps showing the old
+  code until you push (or edit in the browser).
+
+## Saving back to Kaggle
+
+`P` calls `SaveKernel` with `kernel_execution_type: QUICK_SAVE`: a new version
+is created and nothing is queued. The push reuses the settings of the version
+you opened — private flag, GPU/TPU, internet, docker image, machine shape, and
+the dataset/competition/kernel/model sources — so it will not quietly drop your
+data or flip the notebook public. Code cell outputs are stripped and cell
+sources are joined into one string, which is what the server expects.
+
+Reload the notebook page to see the new version. If you want the run too, push
+with `SAVE_AND_RUN_ALL` (not wired to a key yet) or press "Save & Run All" in
+the browser.
 
 ## How editing works
 

@@ -167,6 +167,33 @@ func (nb *Notebook) Marshal() ([]byte, error) {
 	return json.MarshalIndent(nb.doc, "", " ")
 }
 
+// NormalizeForPush prepares a notebook document for the Kaggle push API: code
+// cells are sent without outputs, and each cell's source is joined into one
+// string, both of which the server expects.
+func NormalizeForPush(doc []byte) ([]byte, error) {
+	var parsed struct {
+		Cells []map[string]any `json:"cells"`
+	}
+	if err := json.Unmarshal(doc, &parsed); err != nil {
+		return nil, err
+	}
+	for _, cell := range parsed.Cells {
+		if kind, _ := cell["cell_type"].(string); kind == "code" {
+			cell["outputs"] = []any{}
+		}
+		if lines, ok := cell["source"].([]any); ok {
+			var b strings.Builder
+			for _, line := range lines {
+				if text, ok := line.(string); ok {
+					b.WriteString(text)
+				}
+			}
+			cell["source"] = b.String()
+		}
+	}
+	return json.Marshal(parsed)
+}
+
 func splitLines(source string) []string {
 	if source == "" {
 		return []string{}

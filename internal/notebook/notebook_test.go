@@ -193,3 +193,33 @@ func TestInsertAndDeleteCell(t *testing.T) {
 		t.Error("DeleteCell out of range should return false")
 	}
 }
+
+func TestNormalizeForPush(t *testing.T) {
+	doc := `{"cells":[
+	 {"cell_type":"code","source":["print(1)\n","print(2)"],"outputs":[{"output_type":"stream","text":"1\n"}]},
+	 {"cell_type":"markdown","source":["# hi\n","there"]}
+	],"metadata":{},"nbformat":4}`
+	out, err := NormalizeForPush([]byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var parsed struct {
+		Cells []struct {
+			CellType string `json:"cell_type"`
+			Source   any    `json:"source"`
+			Outputs  []any  `json:"outputs"`
+		} `json:"cells"`
+	}
+	if err := json.Unmarshal(out, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed.Cells[0].Source; got != "print(1)\nprint(2)" {
+		t.Errorf("code source = %#v, want a single joined string", got)
+	}
+	if len(parsed.Cells[0].Outputs) != 0 {
+		t.Errorf("outputs must be stripped, got %v", parsed.Cells[0].Outputs)
+	}
+	if got := parsed.Cells[1].Source; got != "# hi\nthere" {
+		t.Errorf("markdown source = %#v", got)
+	}
+}

@@ -29,19 +29,27 @@ func New(creds Creds) *Client {
 // Kernel is one row of ApiKernelMetadata. ListKernels only fills ref, title,
 // author (a display name) and lastRunTime; the rest arrives with GetKernel.
 type Kernel struct {
-	Ref      string `json:"ref"`
-	Title    string `json:"title"`
-	Author   string `json:"author"`
-	Slug     string `json:"slug"`
-	Language string `json:"language"`
-	Type     string `json:"kernelType"`
-	Machine  string `json:"machineShape"`
-	Private  bool   `json:"isPrivate"`
-	GPU      bool   `json:"enableGpu"`
-	TPU      bool   `json:"enableTpu"`
-	Votes    int    `json:"totalVotes"`
-	Version  int    `json:"currentVersionNumber"`
-	LastRun  string `json:"lastRunTime"`
+	ID         int      `json:"id"`
+	Ref        string   `json:"ref"`
+	Title      string   `json:"title"`
+	Author     string   `json:"author"`
+	Slug       string   `json:"slug"`
+	Language   string   `json:"language"`
+	Type       string   `json:"kernelType"`
+	Machine    string   `json:"machineShape"`
+	Docker     string   `json:"dockerImage"`
+	Private    bool     `json:"isPrivate"`
+	GPU        bool     `json:"enableGpu"`
+	TPU        bool     `json:"enableTpu"`
+	Internet   bool     `json:"enableInternet"`
+	Votes      int      `json:"totalVotes"`
+	Version    int      `json:"currentVersionNumber"`
+	LastRun    string   `json:"lastRunTime"`
+	Categories []string `json:"categoryIds"`
+	Datasets   []string `json:"datasetDataSources"`
+	Kernels    []string `json:"kernelDataSources"`
+	Comps      []string `json:"competitionDataSources"`
+	Models     []string `json:"modelDataSources"`
 
 	Owner string `json:"-"`
 }
@@ -141,6 +149,80 @@ func (c *Client) GetKernel(user, slug string) (Kernel, []byte, error) {
 		return out.Metadata, nil, fmt.Errorf("%s/%s: empty notebook source", user, slug)
 	}
 	return out.Metadata, []byte(out.Blob.Source), nil
+}
+
+// SaveKernel pushes a notebook, creating a new version. execution is a
+// KernelExecutionType name: "QUICK_SAVE" saves without running, "SAVE_AND_RUN_ALL"
+// queues a run on the notebook's accelerator.
+func (c *Client) SaveKernel(meta Kernel, text []byte, execution string) (int, error) {
+	if meta.Slug == "" {
+		return 0, fmt.Errorf("push needs a kaggle notebook, not a local file")
+	}
+
+	req := map[string]any{
+		"slug":                meta.Slug,
+		"newTitle":            meta.Title,
+		"text":                string(text),
+		"language":            firstNonEmpty(meta.Language, "python"),
+		"kernelType":          firstNonEmpty(meta.Type, "notebook"),
+		"isPrivate":           meta.Private,
+		"enableGpu":           meta.GPU,
+		"enableTpu":           meta.TPU,
+		"enableInternet":      meta.Internet,
+		"kernelExecutionType": execution,
+	}
+	if meta.ID > 0 {
+		req["id"] = meta.ID
+	}
+	if meta.Machine != "" {
+		req["machineShape"] = meta.Machine
+	}
+	if meta.Docker != "" {
+		req["dockerImage"] = meta.Docker
+	}
+	if len(meta.Categories) > 0 {
+		req["categoryIds"] = meta.Categories
+	}
+	if len(meta.Datasets) > 0 {
+		req["datasetDataSources"] = meta.Datasets
+	}
+	if len(meta.Kernels) > 0 {
+		req["kernelDataSources"] = meta.Kernels
+	}
+	if len(meta.Comps) > 0 {
+		req["competitionDataSources"] = meta.Comps
+	}
+	if len(meta.Models) > 0 {
+		req["modelDataSources"] = meta.Models
+	}
+
+	var out struct {
+		Ref            string   `json:"ref"`
+		VersionNumber  int      `json:"versionNumber"`
+		Error          string   `json:"error"`
+		InvalidTags    []string `json:"invalidTags"`
+		InvalidData    []string `json:"invalidDatasetSources"`
+		InvalidComps   []string `json:"invalidCompetitionSources"`
+		InvalidKernels []string `json:"invalidKernelSources"`
+		InvalidModels  []string `json:"invalidModelSources"`
+	}
+	if err := c.call("SaveKernel", req, &out); err != nil {
+		return 0, err
+	}
+	if out.Error != "" {
+		return 0, fmt.Errorf("%s", out.Error)
+	}
+	if bad := firstNonEmpty(
+		join(out.InvalidTags), join(out.InvalidData), join(out.InvalidComps),
+		join(out.InvalidKernels), join(out.InvalidModels),
+	); bad != "" {
+		return out.VersionNumber, fmt.Errorf("server rejected sources: %s", bad)
+	}
+	return out.VersionNumber, nil
+}
+
+func join(values []string) string {
+	return strings.Join(values, ", ")
 }
 
 func (c *Client) call(method string, body, out any) error {

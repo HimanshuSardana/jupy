@@ -195,3 +195,81 @@ func TestLoadCredsFromEnvAndFile(t *testing.T) {
 		t.Fatalf("creds = %+v, err = %v", creds, err)
 	}
 }
+
+func TestSaveKernelPreservesMetadata(t *testing.T) {
+	var gotPath string
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		json.Unmarshal(raw, &got)
+		w.Write([]byte(`{"ref":"me/j-bjev","url":"https://kaggle.com/code/me/j-bjev","versionNumber":9}`))
+	}))
+	defer srv.Close()
+
+	meta := Kernel{
+		ID: 42, Ref: "me/j-bjev", Slug: "j-bjev", Title: "Titanic EDA",
+		Language: "python", Type: "notebook", Machine: "NvidiaTeslaT4",
+		Docker: "gcr.io/x@sha256:abc", Private: true, GPU: true, Internet: true,
+		Categories: []string{"tabular"}, Datasets: []string{"me/data"},
+		Comps: []string{"titanic"}, Kernels: []string{"me/other"}, Models: []string{"me/m/1"},
+	}
+	c := New(Creds{Username: "me", Key: "k"})
+	c.BaseURL = srv.URL
+
+	version, err := c.SaveKernel(meta, []byte(`{"cells":[]}`), "QUICK_SAVE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != 9 {
+		t.Errorf("version = %d", version)
+	}
+	if gotPath != "/v1/kernels.KernelsApiService/SaveKernel" {
+		t.Errorf("path = %s", gotPath)
+	}
+
+	want := map[string]any{
+		"slug": "j-bjev", "id": float64(42), "newTitle": "Titanic EDA",
+		"language": "python", "kernelType": "notebook", "machineShape": "NvidiaTeslaT4",
+		"isPrivate": true, "enableGpu": true, "enableInternet": true,
+		"kernelExecutionType": "QUICK_SAVE", "text": `{"cells":[]}`,
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %#v, want %#v", k, got[k], v)
+		}
+	}
+	if list, _ := got["datasetDataSources"].([]any); len(list) != 1 || list[0] != "me/data" {
+		t.Errorf("dataset sources = %#v", got["datasetDataSources"])
+	}
+	if list, _ := got["competitionDataSources"].([]any); len(list) != 1 || list[0] != "titanic" {
+		t.Errorf("competition sources = %#v", got["competitionDataSources"])
+	}
+}
+
+func TestSaveKernelErrors(t *testing.T) {
+	cases := []struct{ name, body string }{
+		{"server error field", `{"error":"title is too short"}`},
+		{"invalid sources", `{"versionNumber":3,"invalidDatasetSources":["me/missing"]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(tc.body))
+			}))
+			defer srv.Close()
+			c := New(Creds{Username: "me", Key: "k"})
+			c.BaseURL = srv.URL
+			if _, err := c.SaveKernel(Kernel{Slug: "me/x"}, []byte("{}"), "QUICK_SAVE"); err == nil {
+				t.Fatal("want an error")
+			}
+		})
+	}
+}
+
+func TestSaveKernelNeedsSlug(t *testing.T) {
+	c := New(Creds{Username: "me", Key: "k"})
+	if _, err := c.SaveKernel(Kernel{Ref: "./local.ipynb"}, []byte("{}"), "QUICK_SAVE"); err == nil {
+		t.Fatal("want an error for a local file")
+	}
+}
