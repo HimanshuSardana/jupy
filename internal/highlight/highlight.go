@@ -20,6 +20,11 @@ const (
 	Emphasis
 	Code
 	Bullet
+
+	// execution output classes, not part of any language
+	Stderr
+	Error
+	Result
 )
 
 type Span struct {

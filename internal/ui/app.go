@@ -1,20 +1,23 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
 	goncurses "github.com/rthornton128/goncurses"
 
 	"github.com/himanshusardana/jupy/internal/highlight"
+	"github.com/himanshusardana/jupy/internal/jupyter"
 	"github.com/himanshusardana/jupy/internal/kaggle"
 	"github.com/himanshusardana/jupy/internal/notebook"
 )
 
-// Config is everything the browser needs: the notebook list, and how to fetch
-// a notebook's cells on demand.
+// Config is everything the browser needs: the notebook list, how to fetch a
+// notebook's cells, and optionally a Jupyter session to attach to on start.
 type Config struct {
 	User      string
+	Session   string
 	Notebooks []kaggle.Kernel
 	Open      func(kaggle.Kernel) (*notebook.Notebook, error)
 	More      func() ([]kaggle.Kernel, error)
@@ -28,16 +31,18 @@ const (
 )
 
 const (
-	helpLine  = "j/k move  J/K scroll  tab pane  enter nvim  r reload  n more  w save  q quit"
+	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  c connect  q quit"
 	minWidth  = 60
 	minHeight = 14
 )
 
-// card is one cell rendered as a box: its source, wrapped and styled.
+// card is one cell rendered as a box: source, then its output when it has any.
 type card struct {
 	cell   int
 	tag    string
+	state  string
 	lines  [][]highlight.Span
+	outs   [][]highlight.Span
 	height int
 }
 
@@ -55,9 +60,16 @@ type app struct {
 	ctop    int
 	selMove bool
 
-	where  focus
-	status string
-	th     theme
+	jup       *session
+	running   int
+	runCancel context.CancelFunc
+	events    chan execEvent
+	outputs   map[int][]jupyter.Event
+
+	where     focus
+	status    string
+	th        theme
+	needsDraw bool
 
 	// ClearOk is forced when content shifts or an external program has
 	// scribbled on the terminal, so ncurses never patches a stale model.
@@ -74,9 +86,21 @@ func Run(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	a := &app{scr: scr, cfg: cfg, nbs: cfg.Notebooks}
+	a := &app{
+		scr:       scr,
+		cfg:       cfg,
+		nbs:       cfg.Notebooks,
+		running:   -1,
+		events:    make(chan execEvent, 512),
+		outputs:   map[int][]jupyter.Event{},
+		needsDraw: true,
+	}
 	a.th = newTheme()
 	defer goncurses.End()
+
+	if cfg.Session != "" {
+		a.attach(cfg.Session)
+	}
 
 	return a.loop()
 }
@@ -90,19 +114,30 @@ func initScreen() (*goncurses.Window, error) {
 	goncurses.Echo(false)
 	goncurses.Raw(true)
 	scr.Keypad(true)
+	// the tick that lets execution output arrive while the UI waits for keys
+	scr.Timeout(120)
 	return scr, nil
 }
 
 func (a *app) loop() error {
 	for {
-		a.draw()
+		a.drainEvents()
+		if a.needsDraw {
+			a.needsDraw = false
+			a.draw()
+		}
+
 		ch := a.scr.GetChar()
-		if ch == 0 {
+		if ch <= 0 {
 			continue
 		}
 		if quit := a.handle(ch); quit {
+			if a.runCancel != nil {
+				a.runCancel()
+			}
 			return nil
 		}
+		a.needsDraw = true
 	}
 }
 
@@ -134,6 +169,16 @@ func (a *app) handle(ch goncurses.Key) bool {
 		a.enter()
 	case 'e':
 		a.editSelectedCell()
+	case 'R', 18:
+		a.runCell(a.csel)
+	case 'a':
+		a.addCell("code")
+	case 'm':
+		a.addCell("markdown")
+	case 'd':
+		a.deleteCell()
+	case 'c':
+		a.connect()
 	case 'r':
 		a.reload()
 	case 'n':
@@ -145,12 +190,11 @@ func (a *app) handle(ch goncurses.Key) bool {
 }
 
 func (a *app) enter() {
-	switch a.where {
-	case focusNotebooks:
+	if a.where == focusNotebooks {
 		a.openSelectedNotebook()
-	case focusCells:
-		a.editSelectedCell()
+		return
 	}
+	a.editSelectedCell()
 }
 
 func (a *app) move(delta int) {
@@ -190,6 +234,11 @@ func (a *app) openSelectedNotebook() {
 	if len(a.nbs) == 0 {
 		return
 	}
+	if a.running >= 0 && a.runCancel != nil {
+		a.runCancel()
+		a.running = -1
+	}
+
 	k := a.nbs[a.nsel]
 	a.status = "loading " + k.Ref + " ..."
 	a.draw()
@@ -207,6 +256,12 @@ func (a *app) openSelectedNotebook() {
 	}
 	a.nb = nb
 	a.csel, a.ctop, a.selMove = 0, 0, true
+	a.outputs = map[int][]jupyter.Event{}
+	for i, c := range nb.Cells {
+		if c.Output != "" {
+			a.outputs[i] = []jupyter.Event{{Kind: jupyter.Stdout, Text: c.Output}}
+		}
+	}
 	a.buildCards()
 	a.where = focusCells
 	a.status = fmt.Sprintf("%s - %d cells", nb.Title, len(nb.Cells))
@@ -217,12 +272,16 @@ func (a *app) buildCards() {
 	if a.nb == nil {
 		return
 	}
-	width := a.layout().bodyW - 2
+	width := a.layout().bodyW - 4
 	if width < 8 {
 		width = 8
 	}
 	for i, c := range a.nb.Cells {
-		a.cards = append(a.cards, newCard(i, c, a.kind(c), width))
+		state := ""
+		if i == a.running {
+			state = "running"
+		}
+		a.cards = append(a.cards, newCard(i, c, a.kind(c), width, a.outputs[i], state))
 	}
 }
 
@@ -305,7 +364,7 @@ func (a *app) save() {
 	a.status = "wrote " + name
 }
 
-func newCard(index int, c notebook.Cell, kind string, width int) card {
+func newCard(index int, c notebook.Cell, kind string, width int, outs []jupyter.Event, state string) card {
 	logical := highlight.Lines(c.Source, kind)
 	var lines [][]highlight.Span
 	for _, line := range logical {
@@ -314,7 +373,19 @@ func newCard(index int, c notebook.Cell, kind string, width int) card {
 	if len(lines) == 0 {
 		lines = [][]highlight.Span{{{Style: highlight.Plain}}}
 	}
-	return card{cell: index, tag: c.Tag(), lines: lines, height: len(lines) + 2}
+
+	var outLines [][]highlight.Span
+	for _, ev := range outs {
+		for _, line := range outputSpans(ev) {
+			outLines = append(outLines, wrapSpans(line, width)...)
+		}
+	}
+
+	height := len(lines) + 2
+	if len(outLines) > 0 {
+		height += len(outLines) + 1
+	}
+	return card{cell: index, tag: c.Tag(), state: state, lines: lines, outs: outLines, height: height}
 }
 
 func wrapSpans(spans []highlight.Span, width int) [][]highlight.Span {
@@ -452,6 +523,19 @@ func (a *app) hline(y, x, width int, attr goncurses.Char, left, right goncurses.
 	a.scr.AttrSet(goncurses.A_NORMAL)
 }
 
+func (a *app) midline(y, x, width int, attr goncurses.Char) {
+	if width < 2 {
+		return
+	}
+	a.scr.AttrSet(attr)
+	a.scr.MoveAddChar(y, x, goncurses.ACS_LTEE)
+	for i := 1; i < width-1; i++ {
+		a.scr.MoveAddChar(y, x+i, goncurses.ACS_HLINE)
+	}
+	a.scr.MoveAddChar(y, x+width-1, goncurses.ACS_RTEE)
+	a.scr.AttrSet(goncurses.A_NORMAL)
+}
+
 func (a *app) drawNotebooks(l layout) {
 	x, width, top, rows := l.listX+1, l.listW-2, l.innerTop, l.listRows
 
@@ -543,23 +627,42 @@ func (a *app) drawCard(x, y, width int, c card, selected bool, clipTop, clipBott
 
 	if y >= clipTop && y <= clipBottom {
 		a.hline(y, x, width, border, goncurses.ACS_ULCORNER, goncurses.ACS_URCORNER)
-		a.put(y, x+2, width-4, fmt.Sprintf(" %d %s ", c.cell+1, c.tag), label, false)
+		title := fmt.Sprintf(" %d %s ", c.cell+1, c.tag)
+		if c.state != "" {
+			title = fmt.Sprintf(" %d %s - %s ", c.cell+1, c.tag, c.state)
+		}
+		a.put(y, x+2, width-4, title, label, false)
 	}
 	if bottom >= clipTop && bottom <= clipBottom {
 		a.hline(bottom, x, width, border, goncurses.ACS_LLCORNER, goncurses.ACS_LRCORNER)
 	}
 
-	for i, spans := range c.lines {
-		row := y + 1 + i
-		if row < clipTop || row > clipBottom {
-			continue
-		}
-		a.scr.AttrSet(border)
-		a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
-		a.scr.MoveAddChar(row, x+width-1, goncurses.ACS_VLINE)
-		a.scr.AttrSet(goncurses.A_NORMAL)
-		a.putSpans(row, x+2, width-4, spans)
+	row := y + 1
+	for _, spans := range c.lines {
+		a.cardRow(row, x, width, border, spans, clipTop, clipBottom)
+		row++
 	}
+	if len(c.outs) > 0 {
+		if row >= clipTop && row <= clipBottom {
+			a.midline(row, x, width, border)
+		}
+		row++
+		for _, spans := range c.outs {
+			a.cardRow(row, x, width, border, spans, clipTop, clipBottom)
+			row++
+		}
+	}
+}
+
+func (a *app) cardRow(row, x, width int, border goncurses.Char, spans []highlight.Span, clipTop, clipBottom int) {
+	if row < clipTop || row > clipBottom {
+		return
+	}
+	a.scr.AttrSet(border)
+	a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
+	a.scr.MoveAddChar(row, x+width-1, goncurses.ACS_VLINE)
+	a.scr.AttrSet(goncurses.A_NORMAL)
+	a.putSpans(row, x+2, width-4, spans)
 }
 
 func (a *app) putSpans(y, x, width int, spans []highlight.Span) {
@@ -581,8 +684,17 @@ func (a *app) putSpans(y, x, width int, spans []highlight.Span) {
 }
 
 func (a *app) drawStatus(l layout) {
+	right := ""
+	if a.jup != nil {
+		right = "connected: " + a.jup.label()
+	}
+	msgWidth := l.w - 2
+	if right != "" && len(right)+2 < msgWidth {
+		a.put(l.h-2, l.w-2-len(right), l.w-2, right, a.th.dim, false)
+		msgWidth = l.w - 4 - len(right)
+	}
 	if a.status != "" {
-		a.put(l.h-2, 1, l.w-2, a.status, a.th.plain, false)
+		a.put(l.h-2, 1, msgWidth, a.status, a.th.plain, false)
 	}
 	a.put(l.h-1, 1, l.w-2, helpLine, a.th.dim, false)
 }
@@ -687,3 +799,5 @@ func scrollInto(sel, off, height, n int) int {
 	}
 	return clamp(off, 0, maxOff)
 }
+
+var _ = context.CancelFunc(nil)

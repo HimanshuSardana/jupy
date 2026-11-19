@@ -178,6 +178,50 @@ func splitLines(source string) []string {
 	return lines
 }
 
+// InsertCell inserts an empty cell of the given type at index at and keeps the
+// source document in sync so a save writes it back.
+func (nb *Notebook) InsertCell(at int, kind string) *Cell {
+	if at < 0 || at > len(nb.Cells) {
+		at = len(nb.Cells)
+	}
+	nb.Cells = append(nb.Cells, Cell{})
+	copy(nb.Cells[at+1:], nb.Cells[at:])
+	nb.Cells[at] = Cell{Type: kind, Edited: true}
+
+	if nb.doc != nil {
+		cells, _ := nb.doc["cells"].([]any)
+		raw := map[string]any{
+			"cell_type": kind,
+			"metadata":  map[string]any{},
+			"source":    []string{},
+		}
+		if kind == "code" {
+			raw["outputs"] = []any{}
+			raw["execution_count"] = nil
+		}
+		cells = append(cells, nil)
+		copy(cells[at+1:], cells[at:])
+		cells[at] = raw
+		nb.doc["cells"] = cells
+	}
+	return &nb.Cells[at]
+}
+
+// DeleteCell removes the cell at index at.
+func (nb *Notebook) DeleteCell(at int) bool {
+	if at < 0 || at >= len(nb.Cells) {
+		return false
+	}
+	nb.Cells = append(nb.Cells[:at], nb.Cells[at+1:]...)
+	if nb.doc != nil {
+		if cells, ok := nb.doc["cells"].([]any); ok && at < len(cells) {
+			cells = append(cells[:at], cells[at+1:]...)
+			nb.doc["cells"] = cells
+		}
+	}
+	return true
+}
+
 func (nb *Notebook) Dirty() int {
 	n := 0
 	for _, c := range nb.Cells {

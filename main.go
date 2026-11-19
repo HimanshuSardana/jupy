@@ -30,6 +30,7 @@ func main() {
 	} else {
 		cfg, err = remoteConfig(*user, *pageSize)
 	}
+	cfg.Session = os.Getenv("JUPY_SESSION_URL")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "jupy: %v\n", err)
 		os.Exit(2)

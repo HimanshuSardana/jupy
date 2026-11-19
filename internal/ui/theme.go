@@ -25,6 +25,10 @@ type theme struct {
 	emphasis  goncurses.Char
 	code      goncurses.Char
 	bullet    goncurses.Char
+
+	stderr goncurses.Char
+	err    goncurses.Char
+	result goncurses.Char
 }
 
 func newTheme() theme {
@@ -47,6 +51,10 @@ func newTheme() theme {
 		emphasis:  goncurses.A_BOLD,
 		code:      goncurses.A_NORMAL,
 		bullet:    goncurses.A_NORMAL,
+
+		stderr: goncurses.A_NORMAL,
+		err:    goncurses.A_BOLD,
+		result: goncurses.A_NORMAL,
 	}
 
 	if !goncurses.HasColors() || goncurses.StartColor() != nil {
@@ -57,7 +65,8 @@ func newTheme() theme {
 		goncurses.InitPair(2, goncurses.C_CYAN, -1) == nil &&
 		goncurses.InitPair(3, goncurses.C_GREEN, -1) == nil &&
 		goncurses.InitPair(4, goncurses.C_YELLOW, -1) == nil &&
-		goncurses.InitPair(5, goncurses.C_BLUE, -1) == nil
+		goncurses.InitPair(5, goncurses.C_BLUE, -1) == nil &&
+		goncurses.InitPair(6, goncurses.C_RED, -1) == nil
 	if !ok {
 		return t
 	}
@@ -67,6 +76,7 @@ func newTheme() theme {
 	green := goncurses.ColorPair(3)
 	yellow := goncurses.ColorPair(4)
 	blue := goncurses.ColorPair(5)
+	red := goncurses.ColorPair(6)
 
 	t.label |= magenta
 	t.heading |= magenta
@@ -84,6 +94,10 @@ func newTheme() theme {
 	t.warn |= yellow
 
 	t.keyword |= blue
+
+	t.stderr |= yellow
+	t.result |= green
+	t.err |= red
 	return t
 }
 
@@ -116,6 +130,12 @@ func (t theme) style(s highlight.Style) goncurses.Char {
 		return t.code
 	case highlight.Bullet:
 		return t.bullet
+	case highlight.Stderr:
+		return t.stderr
+	case highlight.Error:
+		return t.err
+	case highlight.Result:
+		return t.result
 	}
 	return t.plain
 }

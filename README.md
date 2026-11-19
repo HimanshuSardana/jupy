@@ -1,7 +1,8 @@
 # jupy
 
 A small ncurses browser for Kaggle notebooks: list your notebooks, open one to
-see its cells, and edit a cell in `$VISUAL` / `$EDITOR` (nvim by default).
+see its cells rendered as cards, edit a cell in `$VISUAL` / `$EDITOR` (nvim by
+default), and run cells on a Kaggle GPU through a live Jupyter session.
 
 ```
 logged in as: you
@@ -13,8 +14,8 @@ logged in as: you
                               │ from torch.optim import Adam         │
                               │ loss_fn = nn.CrossEntropyLoss()      │
                               └──────────────────────────────────────┘
- epoch baseline - 12 cells
- j/k move  J/K scroll  tab pane  enter nvim  r reload  n more  w save  q quit
+ ready - R runs the selected cell       connected: kkb-...kaggle.net - Tesla T4 x2
+ j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  c connect  q quit
 ```
 
 ## Build
@@ -41,6 +42,10 @@ jupy notebook.ipynb [more...] # local files, no network
 | `tab`, `h` / `l` | switch pane |
 | `enter` | open notebook, or edit the selected cell |
 | `e` | edit the selected cell in the editor |
+| `R` / `ctrl-r` | run the selected cell on the attached kernel |
+| `a` / `m` | insert a code / markdown cell after the selection |
+| `d` | delete the selected cell |
+| `c` | attach to a Kaggle Jupyter session (prompts for the URL) |
 | `J` / `K`, pgup/pgdn | scroll the cell stream |
 | `r` | reload the open notebook |
 | `n` | load the next page of notebooks |
@@ -57,6 +62,32 @@ Checked in this order:
 4. `$KAGGLE_CONFIG_DIR/credentials.json` (OAuth, written by `kaggle auth login`) —
    used as a Bearer token, refreshed through `users.AccountService/GenerateAccessToken`
    when expired, and the result is cached back into the file
+
+## Running cells on a Kaggle GPU
+
+Kaggle's public API can push a notebook and start a *batch* run, but it does not
+mint the interactive Jupyter URL — that one value only comes out of the browser.
+So the session is started on kaggle.com, where you also pick the accelerator,
+and `jupy` attaches to it:
+
+1. Open the notebook on kaggle.com and start an interactive session with the
+   accelerator you want (T4 x2, P100, TPU — the picker is in the session dialog).
+2. `Run -> Kaggle Jupyter Server -> Manually Connect`, copy the *Colab compatible*
+   or *VS Code compatible* URL.
+3. In `jupy`, press `c` and paste it — or export it as `JUPY_SESSION_URL` and
+   `jupy` attaches on startup.
+
+`jupy` then lists the session's kernel (starting `python3` if none is running)
+and probes the hardware with `nvidia-smi`, showing e.g. `Tesla T4 x2` in the
+status line. `R` executes the selected cell over the kernel's websocket channel
+and streams stdout, stderr, results and tracebacks into that cell's card. The
+kernel keeps its state between cells, exactly as in the notebook UI; markdown
+cells are skipped. The session ends when Kaggle idles it out, and the URL stops
+working at that point.
+
+The URL embeds a session JWT. `jupy` keeps it in memory only — it is never
+written to disk, logged, or shown after the prompt — so treat it as a secret and
+do not paste it into anything you keep around.
 
 ## How editing works
 

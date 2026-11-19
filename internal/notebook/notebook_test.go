@@ -125,3 +125,71 @@ func TestParseOutputs(t *testing.T) {
 		t.Errorf("markdown output = %q", nb.Cells[1].Output)
 	}
 }
+
+func TestInsertAndDeleteCell(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "sample.ipynb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nb, err := Parse("t", "t", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	nb.InsertCell(1, "code")
+	if len(nb.Cells) != 5 {
+		t.Fatalf("cells = %d, want 5", len(nb.Cells))
+	}
+	if nb.Cells[1].Type != "code" || !nb.Cells[1].Edited {
+		t.Errorf("inserted cell = %+v", nb.Cells[1])
+	}
+	if nb.Cells[0].Type != "markdown" || nb.Cells[2].Type != "code" {
+		t.Errorf("insert shifted neighbours: %q %q", nb.Cells[0].Type, nb.Cells[2].Type)
+	}
+
+	nb.Cells[1].Source = "print('new')\n"
+	out, err := nb.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Cells []struct {
+			CellType string   `json:"cell_type"`
+			Source   []string `json:"source"`
+			Outputs  []any    `json:"outputs"`
+		} `json:"cells"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Cells) != 5 {
+		t.Fatalf("saved cells = %d, want 5", len(doc.Cells))
+	}
+	if doc.Cells[1].CellType != "code" || len(doc.Cells[1].Source) != 1 || doc.Cells[1].Source[0] != "print('new')\n" {
+		t.Errorf("saved inserted cell = %+v", doc.Cells[1])
+	}
+	if doc.Cells[1].Outputs == nil {
+		t.Error("inserted code cell should carry an empty outputs array")
+	}
+
+	if ok := nb.DeleteCell(1); !ok {
+		t.Fatal("DeleteCell returned false")
+	}
+	if len(nb.Cells) != 4 || nb.Cells[1].Type != "code" {
+		t.Errorf("after delete: %d cells, cell 1 = %q", len(nb.Cells), nb.Cells[1].Type)
+	}
+	out, err = nb.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Cells) != 4 {
+		t.Errorf("saved cells after delete = %d, want 4", len(doc.Cells))
+	}
+
+	if nb.DeleteCell(99) {
+		t.Error("DeleteCell out of range should return false")
+	}
+}
