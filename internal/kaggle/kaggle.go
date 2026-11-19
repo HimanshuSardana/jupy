@@ -81,9 +81,6 @@ func (k Kernel) Badges() string {
 	if k.Private {
 		b = append(b, "private")
 	}
-	if t := k.LastRunTime(); !t.IsZero() {
-		b = append(b, t.Format("2006-01-02"))
-	}
 	return strings.Join(b, " ")
 }
 

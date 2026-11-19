@@ -60,7 +60,7 @@ func TestListKernels(t *testing.T) {
 	if got := first.LastRunTime().UTC().Format("2006-01-02T15:04:05"); got != "2026-02-03T04:05:06" {
 		t.Errorf("last run = %q", got)
 	}
-	if got := first.Badges(); got != "python GPU private 2026-02-03" {
+	if got := first.Badges(); got != "python GPU private" {
 		t.Errorf("badges = %q", got)
 	}
 	if got := kernels[1].Badges(); got != "r" {

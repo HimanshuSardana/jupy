@@ -188,6 +188,9 @@ func (a *app) openSelectedNotebook() {
 		nb.Title = k.Title
 	}
 	a.nb = nb
+	if nb.Language != "" {
+		a.nbs[a.nsel].Language = nb.Language
+	}
 	a.csel, a.coff, a.pvOff = 0, 0, 0
 	a.where = focusCells
 	a.status = fmt.Sprintf("%s - %d cells", nb.Title, len(nb.Cells))
@@ -319,11 +322,17 @@ func (a *app) drawNotebooks(listW, top, rows int) {
 		}
 		k := a.nbs[idx]
 		selected := idx == a.nsel && a.where == focusNotebooks
+		attr := a.th.row(selected)
+
 		row := " " + k.Title
 		if b := k.Badges(); b != "" {
 			row += "  " + b
 		}
-		a.put(top+i, 0, listW, row, a.th.row(selected), true)
+		a.put(top+i, 0, listW-11, row, attr, true)
+		a.put(top+i, listW-11, listW, strings.Repeat(" ", 10), attr, true)
+		if t := k.LastRunTime(); !t.IsZero() {
+			a.put(top+i, listW-11, 10, t.Format("2006-01-02"), attr, true)
+		}
 	}
 }
 
