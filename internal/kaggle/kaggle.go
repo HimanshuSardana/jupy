@@ -6,54 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
 const DefaultBaseURL = "https://api.kaggle.com"
-
-// Creds are the Kaggle username/API-key pair from kaggle.json. The API accepts
-// them as HTTP Basic auth on both the legacy and the RPC endpoints.
-type Creds struct {
-	Username string
-	Key      string
-}
-
-// LoadCreds reads KAGGLE_USERNAME/KAGGLE_KEY, then $KAGGLE_CONFIG_DIR/kaggle.json,
-// then ~/.kaggle/kaggle.json.
-func LoadCreds() (Creds, error) {
-	if u, k := os.Getenv("KAGGLE_USERNAME"), os.Getenv("KAGGLE_KEY"); u != "" && k != "" {
-		return Creds{Username: u, Key: k}, nil
-	}
-
-	dir := os.Getenv("KAGGLE_CONFIG_DIR")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return Creds{}, err
-		}
-		dir = filepath.Join(home, ".kaggle")
-	}
-	path := filepath.Join(dir, "kaggle.json")
-
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return Creds{}, fmt.Errorf("no Kaggle credentials: write %s (or run `kaggle auth login`), or set KAGGLE_USERNAME/KAGGLE_KEY", path)
-	}
-	var file struct {
-		Username string `json:"username"`
-		Key      string `json:"key"`
-	}
-	if err := json.Unmarshal(raw, &file); err != nil {
-		return Creds{}, fmt.Errorf("%s: %w", path, err)
-	}
-	if file.Username == "" || file.Key == "" {
-		return Creds{}, fmt.Errorf("%s: username or key is empty", path)
-	}
-	return Creds{Username: file.Username, Key: file.Key}, nil
-}
 
 type Client struct {
 	BaseURL string
@@ -69,7 +26,8 @@ func New(creds Creds) *Client {
 	}
 }
 
-// Kernel is one row of ApiKernelMetadata (the kernels ListKernels response).
+// Kernel is one row of ApiKernelMetadata. ListKernels only fills ref, title,
+// author (a display name) and lastRunTime; the rest arrives with GetKernel.
 type Kernel struct {
 	Ref      string `json:"ref"`
 	Title    string `json:"title"`
@@ -77,12 +35,31 @@ type Kernel struct {
 	Slug     string `json:"slug"`
 	Language string `json:"language"`
 	Type     string `json:"kernelType"`
+	Machine  string `json:"machineShape"`
 	Private  bool   `json:"isPrivate"`
 	GPU      bool   `json:"enableGpu"`
 	TPU      bool   `json:"enableTpu"`
 	Votes    int    `json:"totalVotes"`
 	Version  int    `json:"currentVersionNumber"`
 	LastRun  string `json:"lastRunTime"`
+
+	Owner string `json:"-"`
+}
+
+// normalize derives owner and slug from ref, which is the only place the API
+// puts them in list responses.
+func (k *Kernel) normalize() {
+	if i := strings.Index(k.Ref, "/"); i > 0 {
+		if k.Owner == "" {
+			k.Owner = k.Ref[:i]
+		}
+		if k.Slug == "" {
+			k.Slug = k.Ref[i+1:]
+		}
+	}
+	if k.Title == "" {
+		k.Title = k.Slug
+	}
 }
 
 func (k Kernel) LastRunTime() time.Time {
@@ -98,14 +75,14 @@ func (k Kernel) Badges() string {
 	if k.Language != "" {
 		b = append(b, k.Language)
 	}
-	if k.GPU {
+	if k.GPU || k.TPU {
 		b = append(b, "GPU")
-	}
-	if k.TPU {
-		b = append(b, "TPU")
 	}
 	if k.Private {
 		b = append(b, "private")
+	}
+	if t := k.LastRunTime(); !t.IsZero() {
+		b = append(b, t.Format("2006-01-02"))
 	}
 	return strings.Join(b, " ")
 }
@@ -141,6 +118,9 @@ func (c *Client) ListKernels(user, pageToken string, pageSize int) ([]Kernel, st
 	if err := c.call("ListKernels", req, &out); err != nil {
 		return nil, "", err
 	}
+	for i := range out.Kernels {
+		out.Kernels[i].normalize()
+	}
 	return out.Kernels, out.NextPageToken, nil
 }
 
@@ -158,6 +138,8 @@ func (c *Client) GetKernel(user, slug string) (Kernel, []byte, error) {
 	if err := c.call("GetKernel", req, &out); err != nil {
 		return Kernel{}, nil, err
 	}
+	out.Metadata.Ref = firstNonEmpty(out.Metadata.Ref, user+"/"+slug)
+	out.Metadata.normalize()
 	if out.Blob.Source == "" {
 		return out.Metadata, nil, fmt.Errorf("%s/%s: empty notebook source", user, slug)
 	}
@@ -175,7 +157,11 @@ func (c *Client) call(method string, body, out any) error {
 	if err != nil {
 		return err
 	}
-	req.SetBasicAuth(c.Creds.Username, c.Creds.Key)
+	if c.Creds.Token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.Creds.Token)
+	} else {
+		req.SetBasicAuth(c.Creds.Username, c.Creds.Key)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "jupy-tui/0.1")
 
@@ -209,4 +195,13 @@ func decodeError(status int, data []byte) error {
 		return &APIError{Code: envelope.Error.Code, Message: envelope.Error.Message}
 	}
 	return &APIError{Code: status, Message: strings.TrimSpace(string(data))}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }
