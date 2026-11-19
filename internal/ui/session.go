@@ -182,11 +182,10 @@ func (a *app) pickAccelerator() (kaggle.Accelerator, bool) {
 	}
 
 	l := a.layout()
-	height := len(options) + 3
-	y := clamp((l.h-height)/2, 0, max(l.h-height, 0))
+	x, y, width, height := a.acceleratorBox(l, options)
 
 	a.draw()
-	a.drawAcceleratorBand(l, y, height, options, sel)
+	a.drawAcceleratorBox(l, x, y, width, height, options, sel)
 
 	for {
 		ch := a.scr.GetChar()
@@ -194,12 +193,12 @@ func (a *app) pickAccelerator() (kaggle.Accelerator, bool) {
 		case 'j', goncurses.KEY_DOWN:
 			if sel < len(options)-1 {
 				sel++
-				a.drawAcceleratorRows(l, y, options, sel)
+				a.drawAcceleratorRows(x, y, width, options, sel)
 			}
 		case 'k', goncurses.KEY_UP:
 			if sel > 0 {
 				sel--
-				a.drawAcceleratorRows(l, y, options, sel)
+				a.drawAcceleratorRows(x, y, width, options, sel)
 			}
 		case '\r', '\n', goncurses.KEY_ENTER:
 			return options[sel], true
@@ -209,39 +208,62 @@ func (a *app) pickAccelerator() (kaggle.Accelerator, bool) {
 	}
 }
 
-// drawAcceleratorBand paints the whole picker once: a full-width band so
-// nothing shows through beside the options.
-func (a *app) drawAcceleratorBand(l layout, y, height int, options []kaggle.Accelerator, sel int) {
-	for row := y; row < y+height; row++ {
-		a.put(row, 0, l.w, "", a.th.plain, true)
+const (
+	acceleratorHint  = "enter start  esc cancel  C url"
+	acceleratorTitle = " start a session "
+)
+
+// acceleratorBox sizes and centres the dialog: as wide as its content, never
+// the whole screen.
+func (a *app) acceleratorBox(l layout, options []kaggle.Accelerator) (x, y, width, height int) {
+	content := len(acceleratorHint)
+	if subject := a.acceleratorSubject(); len(subject) > content {
+		content = len(subject)
+	}
+	for _, acc := range options {
+		if n := len(acc.Label) + 2; n > content {
+			content = n
+		}
 	}
 
-	a.scr.AttrSet(a.th.border)
-	for col := 0; col < l.w-1; col++ {
-		a.scr.MoveAddChar(y, col, goncurses.ACS_HLINE)
-	}
-	a.scr.AttrSet(goncurses.A_NORMAL)
+	width = clamp(content+4, 26, max(l.w-4, 26))
+	height = len(options) + 5
+	x = clamp((l.w-width)/2, 0, max(l.w-width, 0))
+	y = clamp((l.h-height)/2, 0, max(l.h-height, 0))
+	return x, y, width, height
+}
 
-	title := " start a session"
-	if a.curMeta.Slug != "" {
-		title = " start a session for " + a.curMeta.Slug + " "
+func (a *app) acceleratorSubject() string {
+	if a.curMeta.Slug == "" {
+		return ""
 	}
-	a.put(y, 2, l.w-4, title, a.th.label, false)
-	a.put(y+1, 2, l.w-4, " accelerator", a.th.dim, false)
-	a.put(y+height-1, 2, l.w-4, " enter start    esc cancel    C paste a url instead", a.th.dim, false)
+	return a.curMeta.Slug
+}
 
-	a.drawAcceleratorRows(l, y, options, sel)
+// drawAcceleratorBox paints the dialog once: a bordered box, centred, with only
+// its own interior cleared.
+func (a *app) drawAcceleratorBox(l layout, x, y, width, height int, options []kaggle.Accelerator, sel int) {
+	a.panel(x, y, width, height, acceleratorTitle, true)
+
+	for row := y + 1; row < y+height-1; row++ {
+		a.put(row, x+1, width-2, "", a.th.plain, true)
+	}
+
+	a.put(y+1, x+2, width-4, a.acceleratorSubject(), a.th.dim, false)
+	a.put(y+height-2, x+2, width-4, acceleratorHint, a.th.dim, false)
+
+	a.drawAcceleratorRows(x, y, width, options, sel)
 }
 
 // drawAcceleratorRows repaints only the option rows, so moving the selection
 // does not repaint the screen.
-func (a *app) drawAcceleratorRows(l layout, y int, options []kaggle.Accelerator, sel int) {
+func (a *app) drawAcceleratorRows(x, y, width int, options []kaggle.Accelerator, sel int) {
 	for i, acc := range options {
 		attr, mark := a.th.plain, "  "
 		if i == sel {
 			attr, mark = a.th.sel, "> "
 		}
-		a.put(y+2+i, 2, l.w-4, mark+acc.Label, attr, true)
+		a.put(y+2+i, x+1, width-2, "  "+mark+acc.Label, attr, true)
 	}
 	a.scr.Refresh()
 }
