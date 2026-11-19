@@ -349,7 +349,7 @@ func (a *app) buildCards() {
 	if a.nb == nil {
 		return
 	}
-	width := a.layout().bodyW - 4
+	width := a.layout().contentW
 	if width < 8 {
 		width = 8
 	}
@@ -508,11 +508,16 @@ type layout struct {
 	boxTop, boxBottom  int
 	listX, listW       int
 	bodyX, bodyW       int
+	cardX, cardW       int
+	contentW           int
 	innerTop, bodyTop  int
 	listRows, bodyRows int
 }
 
+// The cell column keeps a readable measure inside the right pane.
 const (
+	cardMargin  = 3
+	cardMeasure = 108
 	cardPadding = 2
 	cardGap     = 1
 )
@@ -522,11 +527,22 @@ func (a *app) layout() layout {
 	listW := clamp(w/3, 26, 46)
 	bodyX, bodyW := listW+1, max(w-listW-2, 1)
 
+	cardW := bodyW - 2*cardMargin
+	if cardW > cardMeasure {
+		cardW = cardMeasure
+	}
+	if cardW < 24 {
+		cardW = bodyW
+	}
+	cardX := bodyX + (bodyW-cardW)/2
+
 	return layout{
 		w: w, h: h,
 		boxTop: 1, boxBottom: h - 3,
 		listX: 0, listW: listW,
 		bodyX: bodyX, bodyW: bodyW,
+		cardX: cardX, cardW: cardW,
+		contentW: cardW - 2 - 2*cardPadding,
 		innerTop: 2, listRows: max(h-5, 1),
 		bodyTop: 1, bodyRows: max(h-3, 1),
 	}
@@ -645,14 +661,14 @@ func (a *app) drawNotebooks(l layout) {
 }
 
 func (a *app) drawBody(l layout) {
-	x, width, top, rows := l.bodyX, l.bodyW, l.bodyTop, l.bodyRows
+	x, width, top, rows := l.cardX, l.cardW, l.bodyTop, l.bodyRows
 
 	if a.nb == nil {
-		a.put(top, x+1, width-1, "select a notebook and press enter", a.th.dim, false)
+		a.put(top, x, width, "select a notebook and press enter", a.th.dim, false)
 		return
 	}
 	if len(a.cards) == 0 {
-		a.put(top, x+1, width-1, "this notebook has no cells", a.th.dim, false)
+		a.put(top, x, width, "this notebook has no cells", a.th.dim, false)
 		return
 	}
 
@@ -662,7 +678,7 @@ func (a *app) drawBody(l layout) {
 			break
 		}
 		a.drawCard(x, y, width, c, c.cell == a.csel && a.where == focusCells, top, top+rows-1)
-		y += c.height
+		y += c.height + cardGap
 	}
 }
 
@@ -674,7 +690,7 @@ func (a *app) scrollFor(rows int) int {
 			height = c.height
 			break
 		}
-		start += c.height
+		start += c.height + cardGap
 	}
 
 	if a.selMove {
@@ -698,9 +714,9 @@ func (a *app) scrollFor(rows int) int {
 		}
 	}
 
-	total := 0
+	total := -(cardGap)
 	for _, c := range a.cards {
-		total += c.height
+		total += c.height + cardGap
 	}
 	return clamp(a.ctop, 0, max(total-rows, 0))
 }
