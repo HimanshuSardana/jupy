@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/himanshu/jupy/internal/kaggle"
-	"github.com/himanshu/jupy/internal/notebook"
-	"github.com/himanshu/jupy/internal/ui"
+	"github.com/himanshusardana/jupy/internal/kaggle"
+	"github.com/himanshusardana/jupy/internal/notebook"
+	"github.com/himanshusardana/jupy/internal/ui"
 )
 
 func main() {

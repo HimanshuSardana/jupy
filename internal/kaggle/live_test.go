@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/himanshu/jupy/internal/notebook"
+	"github.com/himanshusardana/jupy/internal/notebook"
 )
 
 // TestLiveListAndPull hits the real API with the ambient Kaggle credentials.

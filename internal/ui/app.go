@@ -6,8 +6,9 @@ import (
 
 	goncurses "github.com/rthornton128/goncurses"
 
-	"github.com/himanshu/jupy/internal/kaggle"
-	"github.com/himanshu/jupy/internal/notebook"
+	"github.com/himanshusardana/jupy/internal/highlight"
+	"github.com/himanshusardana/jupy/internal/kaggle"
+	"github.com/himanshusardana/jupy/internal/notebook"
 )
 
 // Config is everything the browser needs: the notebook list, and how to fetch
@@ -26,6 +27,20 @@ const (
 	focusCells
 )
 
+const (
+	helpLine  = "j/k move  J/K scroll  tab pane  enter nvim  r reload  n more  w save  q quit"
+	minWidth  = 60
+	minHeight = 14
+)
+
+// card is one cell rendered as a box: its source, wrapped and styled.
+type card struct {
+	cell   int
+	tag    string
+	lines  [][]highlight.Span
+	height int
+}
+
 type app struct {
 	scr *goncurses.Window
 	cfg Config
@@ -34,10 +49,11 @@ type app struct {
 	nsel int
 	noff int
 
-	nb    *notebook.Notebook
-	csel  int
-	coff  int
-	pvOff int
+	nb      *notebook.Notebook
+	cards   []card
+	csel    int
+	ctop    int
+	selMove bool
 
 	where  focus
 	status string
@@ -53,7 +69,7 @@ func Run(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	a := &app{scr: scr, cfg: cfg, nbs: cfg.Notebooks, status: helpLine}
+	a := &app{scr: scr, cfg: cfg, nbs: cfg.Notebooks}
 	a.th = newTheme()
 	defer goncurses.End()
 
@@ -71,11 +87,6 @@ func initScreen() (*goncurses.Window, error) {
 	scr.Keypad(true)
 	return scr, nil
 }
-
-const (
-	helpLine = "j/k move  tab pane  enter open  e edit in nvim  r reload  n more  w save  q quit"
-	gutter   = 2
-)
 
 func (a *app) loop() error {
 	for {
@@ -102,10 +113,14 @@ func (a *app) handle(ch goncurses.Key) bool {
 		a.jump(0)
 	case 'G', goncurses.KEY_END:
 		a.jump(-1)
-	case 'J', goncurses.KEY_PAGEDOWN:
-		a.previewScroll(1)
-	case 'K', goncurses.KEY_PAGEUP:
-		a.previewScroll(-1)
+	case 'J':
+		a.scroll(1)
+	case 'K':
+		a.scroll(-1)
+	case goncurses.KEY_PAGEDOWN:
+		a.scroll(a.layout().innerRows / 2)
+	case goncurses.KEY_PAGEUP:
+		a.scroll(-a.layout().innerRows / 2)
 	case '\t', 'l', goncurses.KEY_RIGHT:
 		a.where = focusCells
 	case goncurses.KEY_BTAB, 'h', goncurses.KEY_LEFT:
@@ -136,39 +151,34 @@ func (a *app) enter() {
 func (a *app) move(delta int) {
 	if a.where == focusNotebooks {
 		a.nsel = clampIndex(a.nsel+delta, len(a.nbs))
-	} else {
-		a.csel = clampIndex(a.csel+delta, a.cellCount())
-		a.pvOff = 0
+		return
 	}
+	a.csel = clampIndex(a.csel+delta, len(a.cards))
+	a.selMove = true
 }
 
 func (a *app) jump(to int) {
 	if a.where == focusNotebooks {
 		a.nsel = jumpIndex(to, len(a.nbs))
-	} else {
-		a.csel = jumpIndex(to, a.cellCount())
-		a.pvOff = 0
-	}
-}
-
-func (a *app) previewScroll(delta int) {
-	if a.nb == nil || a.csel >= len(a.nb.Cells) {
 		return
 	}
-	lines := a.previewLines()
-	_, _, _, _, prevRows := a.layout()
-	maxOff := len(lines) - prevRows
-	if maxOff < 0 {
-		maxOff = 0
-	}
-	a.pvOff = clamp(a.pvOff+delta, 0, maxOff)
+	a.csel = jumpIndex(to, len(a.cards))
+	a.selMove = true
 }
 
-func (a *app) cellCount() int {
-	if a.nb == nil {
-		return 0
+func (a *app) scroll(delta int) {
+	if a.nb == nil || delta == 0 {
+		return
 	}
-	return len(a.nb.Cells)
+	total := 0
+	for _, c := range a.cards {
+		total += c.height
+	}
+	max := total - a.layout().innerRows
+	if max < 0 {
+		max = 0
+	}
+	a.ctop = clamp(a.ctop+delta, 0, max)
 }
 
 func (a *app) openSelectedNotebook() {
@@ -187,13 +197,47 @@ func (a *app) openSelectedNotebook() {
 	if nb.Title == "" {
 		nb.Title = k.Title
 	}
-	a.nb = nb
 	if nb.Language != "" {
 		a.nbs[a.nsel].Language = nb.Language
 	}
-	a.csel, a.coff, a.pvOff = 0, 0, 0
+	a.nb = nb
+	a.csel, a.ctop, a.selMove = 0, 0, true
+	a.buildCards()
 	a.where = focusCells
 	a.status = fmt.Sprintf("%s - %d cells", nb.Title, len(nb.Cells))
+}
+
+func (a *app) buildCards() {
+	a.cards = a.cards[:0]
+	if a.nb == nil {
+		return
+	}
+	width := a.layout().bodyW - 2
+	if width < 8 {
+		width = 8
+	}
+	for i, c := range a.nb.Cells {
+		a.cards = append(a.cards, newCard(i, c, a.kind(c), width))
+	}
+}
+
+func (a *app) kind(c notebook.Cell) string {
+	switch c.Type {
+	case "markdown":
+		return "markdown"
+	case "code":
+		if strings.EqualFold(a.language(), "python") {
+			return "python"
+		}
+	}
+	return "text"
+}
+
+func (a *app) language() string {
+	if a.nb == nil {
+		return ""
+	}
+	return a.nb.Language
 }
 
 func (a *app) reload() {
@@ -238,12 +282,10 @@ func (a *app) save() {
 		a.status = err.Error()
 		return
 	}
+
 	name := a.nb.Ref
 	if i := strings.LastIndex(name, "/"); i >= 0 {
 		name = name[i+1:]
-	}
-	if name == "" || name == a.nb.Ref && !strings.HasSuffix(name, ".ipynb") {
-		name = "notebook"
 	}
 	if !strings.HasSuffix(name, ".ipynb") {
 		name += ".ipynb"
@@ -258,68 +300,168 @@ func (a *app) save() {
 	a.status = "wrote " + name
 }
 
-func (a *app) draw() {
+func newCard(index int, c notebook.Cell, kind string, width int) card {
+	logical := highlight.Lines(c.Source, kind)
+	var lines [][]highlight.Span
+	for _, line := range logical {
+		lines = append(lines, wrapSpans(line, width)...)
+	}
+	if len(lines) == 0 {
+		lines = [][]highlight.Span{{{Style: highlight.Plain}}}
+	}
+	return card{cell: index, tag: c.Tag(), lines: lines, height: len(lines) + 2}
+}
+
+func wrapSpans(spans []highlight.Span, width int) [][]highlight.Span {
+	if width <= 0 {
+		return nil
+	}
+	var out [][]highlight.Span
+	var cur []highlight.Span
+	used := 0
+	flush := func() {
+		out = append(out, cur)
+		cur, used = nil, 0
+	}
+
+	for _, span := range spans {
+		runes := []rune(sanitize(span.Text))
+		for len(runes) > 0 {
+			room := width - used
+			if room <= 0 {
+				flush()
+				continue
+			}
+			if len(runes) <= room {
+				cur = append(cur, highlight.Span{Text: string(runes), Style: span.Style})
+				used += len(runes)
+				break
+			}
+			cur = append(cur, highlight.Span{Text: string(runes[:room]), Style: span.Style})
+			runes = runes[room:]
+			flush()
+		}
+	}
+	if len(cur) > 0 || len(out) == 0 {
+		out = append(out, cur)
+	}
+	return out
+}
+
+type layout struct {
+	w, h                int
+	boxTop, boxBottom   int
+	listX, listW        int
+	bodyX, bodyW        int
+	innerTop, innerRows int
+}
+
+func (a *app) layout() layout {
 	h, w := a.scr.MaxYX()
+	listW := clamp(w/3, 26, 46)
+	return layout{
+		w: w, h: h,
+		boxTop: 1, boxBottom: h - 3,
+		listX: 0, listW: listW,
+		bodyX: listW + 1, bodyW: w - listW - 1,
+		innerTop: 2, innerRows: max(h-5, 1),
+	}
+}
+
+func (a *app) draw() {
+	l := a.layout()
 	a.scr.Erase()
 
-	if h < 12 || w < 46 {
-		a.put(0, 0, w, " terminal too small (need 46x12) - press q", a.th.label, false)
+	if l.h < minHeight || l.w < minWidth {
+		a.put(0, 0, l.w, fmt.Sprintf("terminal too small (need %dx%d) - press q", minWidth, minHeight), a.th.warn, false)
 		a.scr.Refresh()
 		return
 	}
 
-	listW, cellsTop, cellsRows, prevTop, prevRows := a.layout()
-
-	a.drawTitle(w)
-	a.drawNotebooks(listW, cellsTop, prevRows+cellsRows+1)
-	a.drawCells(listW, cellsTop, cellsRows, prevTop, prevRows)
-	a.drawStatus(h, w)
+	a.drawLogin(l)
+	boxH := l.boxBottom - l.boxTop + 1
+	a.panel(l.listX, l.boxTop, l.listW, boxH, fmt.Sprintf("Notebooks (%d)", len(a.nbs)), a.where == focusNotebooks)
+	a.panel(l.bodyX, l.boxTop, l.bodyW, boxH, a.bodyLabel(), a.where == focusCells)
+	a.drawNotebooks(l)
+	a.drawBody(l)
+	a.drawStatus(l)
 	a.scr.Refresh()
 }
 
-// layout returns the left pane width, the first cells row, how many rows it
-// gets, the preview header row, and the preview height.
-func (a *app) layout() (listW, cellsTop, cellsRows, prevTop, prevRows int) {
-	h, w := a.scr.MaxYX()
-	listW = clamp(w/3, 24, 46)
-	bodyBottom := h - 3
-
-	cellsTop = 2
-	available := bodyBottom - cellsTop + 1
-	cellsRows = clamp(available/2-1, 3, available-2)
-	prevTop = cellsTop + cellsRows + 1
-	prevRows = bodyBottom - prevTop + 1
-	return
+func (a *app) drawLogin(l layout) {
+	const prefix = "logged in as: "
+	name := a.cfg.User
+	if name == "" {
+		name = "(local files)"
+	}
+	a.put(0, 1, l.w-1, prefix, a.th.dim, false)
+	a.put(0, 1+len(prefix), l.w-1-len(prefix), name, a.th.label, false)
 }
 
-func (a *app) drawTitle(w int) {
-	label := "jupy"
-	if a.cfg.User != "" {
-		label += "  @" + a.cfg.User
+func (a *app) bodyLabel() string {
+	if a.nb == nil {
+		return "Cells"
 	}
-	if a.nb != nil {
-		label += "  " + a.nb.Title
-		if n := a.nb.Dirty(); n > 0 {
-			label += fmt.Sprintf("  [%d edited]", n)
-		}
+	label := fmt.Sprintf("Cells (%d)", len(a.nb.Cells))
+	if a.nb.Title != "" {
+		label += " - " + a.nb.Title
 	}
-	a.section(0, 0, w, label, true)
+	if n := a.nb.Dirty(); n > 0 {
+		label += fmt.Sprintf(" - %d edited", n)
+	}
+	return label
 }
 
-func (a *app) drawNotebooks(listW, top, rows int) {
-	a.section(1, 0, listW, fmt.Sprintf("Notebooks (%d)", len(a.nbs)), a.where == focusNotebooks)
+// panel draws a box with its label sitting in the top border.
+func (a *app) panel(x, y, width, height int, label string, focused bool) {
+	if width < 4 || height < 3 {
+		return
+	}
+	border, text := a.th.border, a.th.dim
+	if focused {
+		border, text = a.th.focusBorder, a.th.label
+	}
+	right, bottom := x+width-1, y+height-1
 
+	a.hline(y, x, width, border, goncurses.ACS_ULCORNER, goncurses.ACS_URCORNER)
+	a.hline(bottom, x, width, border, goncurses.ACS_LLCORNER, goncurses.ACS_LRCORNER)
+	a.scr.AttrSet(border)
+	for j := 1; j < height-1; j++ {
+		a.scr.MoveAddChar(y+j, x, goncurses.ACS_VLINE)
+		a.scr.MoveAddChar(y+j, right, goncurses.ACS_VLINE)
+	}
+	a.scr.AttrSet(goncurses.A_NORMAL)
+
+	if label != "" {
+		a.put(y, x+2, width-4, " "+label+" ", text, false)
+	}
+}
+
+func (a *app) hline(y, x, width int, attr goncurses.Char, left, right goncurses.Char) {
+	if width < 2 {
+		return
+	}
+	a.scr.AttrSet(attr)
+	a.scr.MoveAddChar(y, x, left)
+	for i := 1; i < width-1; i++ {
+		a.scr.MoveAddChar(y, x+i, goncurses.ACS_HLINE)
+	}
+	a.scr.MoveAddChar(y, x+width-1, right)
+	a.scr.AttrSet(goncurses.A_NORMAL)
+}
+
+func (a *app) drawNotebooks(l layout) {
+	x, width, top, rows := l.listX+1, l.listW-2, l.innerTop, l.innerRows
 	a.noff = scrollInto(a.nsel, a.noff, rows, len(a.nbs))
+
 	for i := 0; i < rows; i++ {
 		idx := a.noff + i
 		if idx >= len(a.nbs) {
 			break
 		}
 		k := a.nbs[idx]
-		selected := idx == a.nsel && a.where == focusNotebooks
-		attr := a.th.normal
-		mark := "  "
-		if selected {
+		attr, mark := a.th.plain, "  "
+		if idx == a.nsel && a.where == focusNotebooks {
 			attr, mark = a.th.sel, "> "
 		}
 
@@ -327,112 +469,126 @@ func (a *app) drawNotebooks(listW, top, rows int) {
 		if b := k.Badges(); b != "" {
 			row += "  " + b
 		}
-		a.put(top+i, 0, listW-11, row, attr, false)
+		a.put(top+i, x, width-11, row, attr, false)
 		if t := k.LastRunTime(); !t.IsZero() {
-			a.put(top+i, listW-10, 10, t.Format("2006-01-02"), a.th.dim, false)
+			a.put(top+i, x+width-10, 10, t.Format("2006-01-02"), a.th.dim, false)
 		}
 	}
 }
 
-func (a *app) drawCells(listW, top, rows, prevTop, prevRows int) {
-	x := listW + gutter
-	width := a.scrMaxX() - x
-
-	label := "Cells"
-	if a.nb != nil {
-		label = fmt.Sprintf("Cells (%d)", len(a.nb.Cells))
-	}
-	a.section(1, x, width, label, a.where == focusCells)
+func (a *app) drawBody(l layout) {
+	x, width, top, rows := l.bodyX+1, l.bodyW-2, l.innerTop, l.innerRows
 
 	if a.nb == nil {
 		a.put(top, x, width, "select a notebook and press enter", a.th.dim, false)
-		a.section(prevTop, x, width, "Preview", false)
+		return
+	}
+	if len(a.cards) == 0 {
+		a.put(top, x, width, "this notebook has no cells", a.th.dim, false)
 		return
 	}
 
-	a.coff = scrollInto(a.csel, a.coff, rows, len(a.nb.Cells))
-	for i := 0; i < rows; i++ {
-		idx := a.coff + i
-		if idx >= len(a.nb.Cells) {
+	a.ctop = a.scrollFor(rows)
+	y := top - a.ctop
+	for _, c := range a.cards {
+		if y > top+rows {
 			break
 		}
-		c := a.nb.Cells[idx]
-		selected := idx == a.csel && a.where == focusCells
-		attr := a.th.normal
-		mark := " "
-		if selected {
-			attr, mark = a.th.sel, ">"
+		a.drawCard(x, y, width, c, c.cell == a.csel && a.where == focusCells, top, top+rows-1)
+		y += c.height
+	}
+}
+
+// scrollFor keeps the selected card in view unless the user scrolled it away.
+func (a *app) scrollFor(rows int) int {
+	start, height := 0, 0
+	for i, c := range a.cards {
+		if i == a.csel {
+			height = c.height
+			break
 		}
-		edited := " "
-		if c.Edited {
-			edited = "*"
+		start += c.height
+	}
+
+	if a.selMove {
+		a.selMove = false
+		if height <= rows {
+			if a.ctop > start {
+				a.ctop = start
+			}
+			if a.ctop+rows < start+height {
+				a.ctop = start + height - rows
+			}
+		} else {
+			a.ctop = start
 		}
-		row := fmt.Sprintf("%s%s%3d %-3s %s", mark, edited, idx+1, c.Tag(), c.Preview())
-		a.put(top+i, x, width, row, attr, false)
+	} else {
+		if start+height <= a.ctop {
+			a.ctop = start
+		}
+		if start >= a.ctop+rows {
+			a.ctop = start
+		}
 	}
 
-	cell := a.nb.Cells[a.csel]
-	lines := a.previewLines()
-	label = fmt.Sprintf("Cell %d of %d - %s", a.csel+1, len(a.nb.Cells), cell.Type)
-	if max := len(lines) - prevRows; max > 0 {
-		label += fmt.Sprintf("  [%d%%]", a.pvOff*100/max)
+	total := 0
+	for _, c := range a.cards {
+		total += c.height
 	}
-	a.section(prevTop, listW+gutter, prevRows+1, label, true)
+	return clamp(a.ctop, 0, max(total-rows, 0))
+}
 
-	lines = lines[a.pvOff:]
-	for i := 0; i < prevRows && i < len(lines); i++ {
-		a.put(prevTop+1+i, x, width, lines[i], a.th.normal, false)
+func (a *app) drawCard(x, y, width int, c card, selected bool, clipTop, clipBottom int) {
+	border, label := a.th.border, a.th.dim
+	if selected {
+		border, label = a.th.focusBorder, a.th.label
+	}
+	bottom := y + c.height - 1
+
+	if y >= clipTop && y <= clipBottom {
+		a.hline(y, x, width, border, goncurses.ACS_ULCORNER, goncurses.ACS_URCORNER)
+		a.put(y, x+2, width-4, fmt.Sprintf(" %d %s ", c.cell+1, c.tag), label, false)
+	}
+	if bottom >= clipTop && bottom <= clipBottom {
+		a.hline(bottom, x, width, border, goncurses.ACS_LLCORNER, goncurses.ACS_LRCORNER)
+	}
+
+	for i, spans := range c.lines {
+		row := y + 1 + i
+		if row < clipTop || row > clipBottom {
+			continue
+		}
+		a.scr.AttrSet(border)
+		a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
+		a.scr.MoveAddChar(row, x+width-1, goncurses.ACS_VLINE)
+		a.scr.AttrSet(goncurses.A_NORMAL)
+		a.putSpans(row, x+1, width-2, spans)
 	}
 }
 
-func (a *app) previewLines() []string {
-	if a.nb == nil || a.csel >= len(a.nb.Cells) {
-		return nil
-	}
-	lines := strings.Split(a.nb.Cells[a.csel].Source, "\n")
-	for i := range lines {
-		lines[i] = sanitize(lines[i])
-	}
-	return lines
-}
-
-func (a *app) drawStatus(h, w int) {
-	msg := a.status
-	if msg == "" {
-		msg = helpLine
-	}
-	a.put(h-2, 0, w, msg, a.th.normal, false)
-	a.put(h-1, 0, w, helpLine, a.th.dim, false)
-}
-
-// section draws a label and a hairline rule running to the right edge, the
-// card-header treatment used instead of filled panel backgrounds.
-func (a *app) section(y, x, width int, label string, focused bool) {
-	attr := a.th.labelFor(focused)
-	text := " " + label + " "
-	a.put(y, x, width, text, attr, false)
-	used := len([]rune(sanitize(text)))
-	a.rule(y, x+used, width-used, attr)
-}
-
-func (a *app) rule(y, x, width int, attr goncurses.Char) {
-	h, w := a.scr.MaxYX()
-	if width <= 0 || y < 0 || y >= h || x < 0 || x >= w {
-		return
-	}
-	if x+width > w {
-		width = w - x
-	}
-	a.scr.AttrSet(attr)
-	for i := 0; i < width; i++ {
-		a.scr.MoveAddChar(y, x+i, goncurses.ACS_HLINE)
+func (a *app) putSpans(y, x, width int, spans []highlight.Span) {
+	cx := x
+	for _, span := range spans {
+		room := width - (cx - x)
+		if room <= 0 {
+			break
+		}
+		text := truncate(sanitize(span.Text), room)
+		if text == "" {
+			continue
+		}
+		a.scr.AttrSet(a.th.style(span.Style))
+		a.scr.MovePrintf(y, cx, "%s", text)
+		cx += len([]rune(text))
 	}
 	a.scr.AttrSet(goncurses.A_NORMAL)
 }
 
-func (a *app) scrMaxX() int {
-	_, w := a.scr.MaxYX()
-	return w
+func (a *app) drawStatus(l layout) {
+	if a.status != "" {
+		a.put(l.h-2, 1, l.w-1, a.status, a.th.plain, false)
+	}
+	a.put(l.h-1, 1, l.w-1, helpLine, a.th.dim, false)
 }
 
 func (a *app) put(y, x, width int, s string, attr goncurses.Char, fill bool) {
@@ -455,8 +611,30 @@ func (a *app) put(y, x, width int, s string, attr goncurses.Char, fill bool) {
 	a.scr.AttrSet(goncurses.A_NORMAL)
 }
 
+// sanitize flattens control characters and folds non-ASCII runes: goncurses
+// builds against narrow ncurses, where a multi-byte rune would occupy several
+// cells and break every column calculation after it.
 func sanitize(s string) string {
-	return strings.NewReplacer("\t", "    ", "\r", " ", "\n", " ").Replace(s)
+	s = strings.NewReplacer("\t", "    ", "\r", " ", "\n", " ").Replace(s)
+	if isASCII(s) {
+		return s
+	}
+	runes := []rune(s)
+	for i, r := range runes {
+		if r > 0x7e || r < 0x20 {
+			runes[i] = '?'
+		}
+	}
+	return string(runes)
+}
+
+func isASCII(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] > 0x7e || (s[i] < 0x20 && s[i] != 0) {
+			return false
+		}
+	}
+	return true
 }
 
 func truncate(s string, n int) string {

@@ -1,4 +1,4 @@
-module github.com/himanshu/jupy
+module github.com/himanshusardana/jupy
 
 go 1.27.3
 
