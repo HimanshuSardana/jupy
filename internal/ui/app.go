@@ -346,6 +346,13 @@ func (a *app) save() {
 		a.status = "nothing open"
 		return
 	}
+	// keep output produced in this session in the local copy
+	for i := 0; i < len(a.nb.Cells) && len(a.outputs) > 0; i++ {
+		if outs, ok := a.outputs[i]; ok && a.nb.Cells[i].Type == "code" {
+			a.nb.SetCellOutputs(i, ipynbOutputs(outs))
+		}
+	}
+
 	data, err := a.nb.Marshal()
 	if err != nil {
 		a.status = err.Error()

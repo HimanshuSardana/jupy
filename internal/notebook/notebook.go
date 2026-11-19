@@ -279,6 +279,21 @@ func (nb *Notebook) DeleteCell(at int) bool {
 	return true
 }
 
+// SetCellOutputs replaces a cell's outputs in the source document, so a local
+// save keeps the output that was just produced.
+func (nb *Notebook) SetCellOutputs(index int, outputs []any) {
+	if nb.doc == nil || index < 0 {
+		return
+	}
+	cells, _ := nb.doc["cells"].([]any)
+	if index >= len(cells) {
+		return
+	}
+	if cell, ok := cells[index].(map[string]any); ok {
+		cell["outputs"] = outputs
+	}
+}
+
 func (nb *Notebook) Dirty() int {
 	n := 0
 	for _, c := range nb.Cells {

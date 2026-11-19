@@ -102,6 +102,13 @@ do not paste it into anything you keep around.
   exist in the same kernel the browser is attached to, but the browser's
   notebook file comes from Kaggle's version store, so it keeps showing the old
   code until you push (or edit in the browser).
+- **Output is ephemeral on Kaggle's side.** A run's output exists in the kernel
+  and in `jupy`'s cards; `w` now writes it into the local `.ipynb` too. A push
+  strips outputs (the push API expects cells without them, exactly like
+  `kaggle kernels push`), and Kaggle only stores outputs when a version is saved
+  or run on Kaggle's side — so the notebook on kaggle.com shows code without
+  output. Use "Save Version" in the browser, or push with `SAVE_AND_RUN_ALL`
+  (queues a full run and costs quota), if you want the output stored there.
 
 ## Saving back to Kaggle
 

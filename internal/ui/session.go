@@ -352,6 +352,79 @@ func (a *app) shiftOutputs(at, delta int) {
 	a.outputs = shifted
 }
 
+// ipynbOutputs renders live execution output in notebook output format, so a
+// local save carries the output that was just produced.
+func ipynbOutputs(events []jupyter.Event) []any {
+	var out []any
+	var streamName string
+	var streamText []string
+
+	flushStream := func() {
+		if streamName == "" {
+			return
+		}
+		if len(streamText) > 0 {
+			out = append(out, map[string]any{
+				"output_type": "stream",
+				"name":        streamName,
+				"text":        streamText,
+			})
+		}
+		streamName, streamText = "", nil
+	}
+
+	lines := func(text string) []string {
+		parts := strings.SplitAfter(text, "\n")
+		if n := len(parts); n > 1 && parts[n-1] == "" {
+			parts = parts[:n-1]
+		}
+		return parts
+	}
+
+	for _, ev := range events {
+		switch ev.Kind {
+		case jupyter.Stdout, jupyter.Stderr:
+			name := "stdout"
+			if ev.Kind == jupyter.Stderr {
+				name = "stderr"
+			}
+			if streamName != "" && streamName != name {
+				flushStream()
+			}
+			streamName = name
+			streamText = append(streamText, lines(ev.Text)...)
+
+		case jupyter.Result:
+			flushStream()
+			out = append(out, map[string]any{
+				"output_type":     "execute_result",
+				"execution_count": nil,
+				"data":            map[string]any{"text/plain": lines(ev.Text)},
+				"metadata":        map[string]any{},
+			})
+
+		case jupyter.Image:
+			flushStream()
+			out = append(out, map[string]any{
+				"output_type": "display_data",
+				"data":        map[string]any{"text/plain": lines(ev.Text)},
+				"metadata":    map[string]any{},
+			})
+
+		case jupyter.Error:
+			flushStream()
+			out = append(out, map[string]any{
+				"output_type": "error",
+				"ename":       "",
+				"evalue":      "",
+				"traceback":   lines(ev.Text),
+			})
+		}
+	}
+	flushStream()
+	return out
+}
+
 func outputSpans(ev jupyter.Event) [][]highlight.Span {
 	style := highlight.Plain
 	switch ev.Kind {

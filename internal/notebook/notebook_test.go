@@ -305,3 +305,40 @@ func TestMarshalThenNormalizeKeepsDocumentShape(t *testing.T) {
 		t.Errorf("outputs should be stripped, got %v", outs)
 	}
 }
+
+func TestSetCellOutputsSurvivesMarshal(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("testdata", "sample.ipynb"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nb, err := Parse("t", "t", raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nb.SetCellOutputs(1, []any{map[string]any{
+		"output_type": "stream", "name": "stdout", "text": []string{"hi\n"},
+	}})
+
+	out, err := nb.Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Cells []struct {
+			CellType string `json:"cell_type"`
+			Outputs  []struct {
+				OutputType string   `json:"output_type"`
+				Text       []string `json:"text"`
+			} `json:"outputs"`
+		} `json:"cells"`
+	}
+	if err := json.Unmarshal(out, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Cells[1].Outputs) != 1 || doc.Cells[1].Outputs[0].Text[0] != "hi\n" {
+		t.Errorf("cell 1 outputs = %+v", doc.Cells[1].Outputs)
+	}
+	if len(doc.Cells[2].Outputs) != 1 {
+		t.Errorf("untouched cell 2 lost its original output: %d", len(doc.Cells[2].Outputs))
+	}
+}
