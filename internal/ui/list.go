@@ -45,16 +45,17 @@ func (a *app) drawList(l layout) {
 			break
 		}
 		k := a.nbs[idx]
-		attr, mark := a.th.plain, "  "
+		titleAttr, metaAttr := a.th.plain, a.th.dim
 		if idx == a.nsel {
-			attr, mark = a.th.sel, "> "
+			titleAttr, metaAttr = a.th.cursorLine, a.th.cursorLine
+			a.put(l.listTop+i, 0, l.w, "", a.th.cursorLine, true)
 		}
 
-		a.put(l.listTop+i, 0, gutter, mark, attr, false)
-		a.put(l.listTop+i, gutter, titleW, k.Title, attr, false)
-		a.put(l.listTop+i, slugX, slugW, k.Slug, a.th.dim, false)
+		a.put(l.listTop+i, 0, gutter, "  ", titleAttr, false)
+		a.put(l.listTop+i, gutter, titleW, k.Title, titleAttr, false)
+		a.put(l.listTop+i, slugX, slugW, k.Slug, metaAttr, false)
 		if t := k.LastRunTime(); !t.IsZero() {
-			a.put(l.listTop+i, l.w-1-dateW, dateW, t.Format("2006-01-02"), a.th.dim, false)
+			a.put(l.listTop+i, l.w-1-dateW, dateW, t.Format("2006-01-02"), metaAttr, false)
 		}
 	}
 }
