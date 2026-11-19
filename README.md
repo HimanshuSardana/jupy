@@ -5,17 +5,28 @@ see its cells rendered as cards, edit a cell in `$VISUAL` / `$EDITOR` (nvim by
 default), and run cells on a Kaggle GPU through a live Jupyter session.
 
 ```
-logged in as: you
-┌ Notebooks (40) ───────────┐ ┌ 1 py ────────────────────────────────┐
-│   notebook72cbd09a56 11-19│ │ import torch                         │
-│ > J*bJev             11-04│ │ import torch.nn as nn                │
-│   notebooke38a2762d0 10-09│ └──────────────────────────────────────┘
-└───────────────────────────┘ ┌ 2 py ────────────────────────────────┐
-                              │ from torch.optim import Adam         │
-                              │ loss_fn = nn.CrossEntropyLoss()      │
-                              └──────────────────────────────────────┘
+ [1] notebooks (41)                                        sort: last run
+  title                          notebook                     updated
+──────────────────────────────────────────────────────────────────────────
+. my notebooks (41)
+> notebook175287c276             notebook175287c276           2026-11-19
+  J*bJev                         j-bjev                       2026-11-04
+  notebooke38a2762d0             notebooke38a2762d0           2026-10-09
+ j/k move  enter open  a new  o browser  n more  ctrl-p commands  q quit
+```
+
+Pressing `enter` opens the notebook, and its cells fill the screen:
+
+```
+ [2] himanshusardana2/notebook175287c276 (2 cells)               esc back
+┌ 1 py ──────────────────────────────────────────────────────────────────┐
+│ print("hello world")                                                   │
+└────────────────────────────────────────────────────────────────────────┘
+┌ 2 py ──────────────────────────────────────────────────────────────────┐
+│ print("second cell")                                                   │
+└────────────────────────────────────────────────────────────────────────┘
  ready - R runs the selected cell       connected: kkb-...kaggle.net - Tesla T4 x2
- j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  c connect  q quit
+ j/k move  J/K scroll  enter edit  R run  a/m add  d del  P push  esc back
 ```
 
 ## Build
@@ -35,13 +46,27 @@ jupy -user someone            # another account's public notebooks
 jupy notebook.ipynb [more...] # local files, no network
 ```
 
+`ctrl-p` opens the command palette on either screen: type to filter, `j`/`k` or
+arrows to move, `enter` runs, `esc` cancels, `ctrl-u` clears the query.
+
+### Notebook table
+
 | key | action |
 |---|---|
-| `j` / `k`, arrows | move |
-| `g` / `G` | first / last |
-| `tab`, `h` / `l` | switch pane |
-| `enter` | open notebook, or edit the selected cell |
-| `e` | edit the selected cell in the editor |
+| `j` / `k`, arrows, `g` / `G` | move the selection |
+| `enter` / `l` | open the selected notebook |
+| `a` | create a notebook (prompts for a title) |
+| `o` | open the selected notebook on kaggle.com |
+| `n` | load the next page of notebooks |
+
+### Notebook screen
+
+| key | action |
+|---|---|
+| `esc` / `h` | back to the table |
+| `j` / `k`, arrows, `g` / `G` | move between cells |
+| `J` / `K`, pgup/pgdn | scroll the cell stream |
+| `enter` / `e` | edit the selected cell in the editor |
 | `R` / `ctrl-r` | run the selected cell on the attached kernel |
 | `a` / `m` | insert a code / markdown cell after the selection |
 | `d` | delete the selected cell |
@@ -49,12 +74,11 @@ jupy notebook.ipynb [more...] # local files, no network
 | `C` | attach to a session by pasting its URL (fallback) |
 | `x` | stop the session `c` started |
 | `o` | open the notebook on kaggle.com in the browser |
-| `J` / `K`, pgup/pgdn | scroll the cell stream |
 | `r` | reload the open notebook |
-| `n` | load the next page of notebooks |
 | `w` | write the notebook (with your edits) to `./<slug>.ipynb` |
 | `P` | push the buffer to Kaggle as a new version (no run) |
-| `q` | quit |
+
+`q` quits from either screen.
 
 ## Credentials
 
@@ -98,6 +122,13 @@ and a session for a notebook that already has one refuses with
 
 Either URL embeds a session credential. `jupy` keeps it in memory only — never
 written to disk, logged, or redrawn after the prompt.
+
+## Screens
+
+The table is one row per notebook with its slug and last run, plus a group row
+and a sort note. `a` creates a notebook from here: it prompts for a title, makes
+it private on Kaggle with `QUICK_SAVE` (so nothing runs), and opens it so you can
+add cells. The notebook screen is the cell stream, one box per cell, full width.
 
 ## Opening the notebook
 
