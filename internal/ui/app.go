@@ -456,7 +456,7 @@ func (a *app) layout() layout {
 		bodyTop: 1, bodyRows: max(h-3, 1),
 		bodyX: 0, bodyW: max(w-1, 1),
 		statusY: h - 2, helpY: h - 1,
-		listTop: 3, listRows: max(h-5, 1),
+		listTop: 3, listRows: max(h-6, 1),
 	}
 }
 
