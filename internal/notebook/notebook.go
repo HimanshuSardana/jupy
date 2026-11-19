@@ -169,15 +169,24 @@ func (nb *Notebook) Marshal() ([]byte, error) {
 
 // NormalizeForPush prepares a notebook document for the Kaggle push API: code
 // cells are sent without outputs, and each cell's source is joined into one
-// string, both of which the server expects.
+// string, both of which the server expects. Everything else in the document is
+// preserved — dropping nbformat or metadata makes Kaggle's notebook editor fail
+// to load the version ("can't access property orig_nbformat").
 func NormalizeForPush(doc []byte) ([]byte, error) {
-	var parsed struct {
-		Cells []map[string]any `json:"cells"`
-	}
+	var parsed map[string]any
 	if err := json.Unmarshal(doc, &parsed); err != nil {
 		return nil, err
 	}
-	for _, cell := range parsed.Cells {
+	if err := validateNotebook(parsed); err != nil {
+		return nil, err
+	}
+
+	cells, _ := parsed["cells"].([]any)
+	for _, raw := range cells {
+		cell, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
 		if kind, _ := cell["cell_type"].(string); kind == "code" {
 			cell["outputs"] = []any{}
 		}
@@ -192,6 +201,27 @@ func NormalizeForPush(doc []byte) ([]byte, error) {
 		}
 	}
 	return json.Marshal(parsed)
+}
+
+// validateNotebook rejects documents the Kaggle renderer cannot open.
+func validateNotebook(doc map[string]any) error {
+	var missing []string
+	if _, ok := doc["cells"].([]any); !ok {
+		missing = append(missing, "cells")
+	}
+	if _, ok := doc["metadata"].(map[string]any); !ok {
+		missing = append(missing, "metadata")
+	}
+	if _, ok := doc["nbformat"]; !ok {
+		missing = append(missing, "nbformat")
+	}
+	if _, ok := doc["nbformat_minor"]; !ok {
+		missing = append(missing, "nbformat_minor")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("refusing to push an incomplete notebook: missing %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func splitLines(source string) []string {
