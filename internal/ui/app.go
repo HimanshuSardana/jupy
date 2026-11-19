@@ -22,6 +22,11 @@ type Config struct {
 	Open      func(kaggle.Kernel) (*notebook.Notebook, kaggle.Kernel, error)
 	More      func() ([]kaggle.Kernel, error)
 	Push      func(kaggle.Kernel, []byte) (int, error)
+
+	// StartSession starts an interactive session for a notebook on the given
+	// machine shape and returns the Jupyter URLs to try, best first.
+	StartSession func(kaggle.Kernel, string) (kaggle.StartedSession, error)
+	StopSession  func(id int) error
 }
 
 type focus int
@@ -32,7 +37,7 @@ const (
 )
 
 const (
-	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  P push  c connect  q quit"
+	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  P push  c session  C url  x stop  q quit"
 	minWidth  = 60
 	minHeight = 14
 )
@@ -63,6 +68,7 @@ type app struct {
 	selMove bool
 
 	jup       *session
+	sessionID int
 	running   int
 	runCancel context.CancelFunc
 	events    chan execEvent
@@ -181,6 +187,10 @@ func (a *app) handle(ch goncurses.Key) bool {
 		a.deleteCell()
 	case 'c':
 		a.connect()
+	case 'C':
+		a.connectByURL()
+	case 'x':
+		a.stopSession()
 	case 'r':
 		a.reload()
 	case 'n':
@@ -272,6 +282,21 @@ func (a *app) openSelectedNotebook() {
 	a.status = fmt.Sprintf("%s - %d cells", nb.Title, len(nb.Cells))
 }
 
+// applyOutputs writes output produced in this session into the document, so
+// saving and pushing both carry what the cells printed.
+func (a *app) applyOutputs() {
+	if a.nb == nil {
+		return
+	}
+	for i := 0; i < len(a.nb.Cells); i++ {
+		outs, ok := a.outputs[i]
+		if !ok || len(outs) == 0 || a.nb.Cells[i].Type != "code" {
+			continue
+		}
+		a.nb.SetCellOutputs(i, ipynbOutputs(outs))
+	}
+}
+
 func (a *app) buildCards() {
 	a.cards = a.cards[:0]
 	if a.nb == nil {
@@ -346,12 +371,7 @@ func (a *app) save() {
 		a.status = "nothing open"
 		return
 	}
-	// keep output produced in this session in the local copy
-	for i := 0; i < len(a.nb.Cells) && len(a.outputs) > 0; i++ {
-		if outs, ok := a.outputs[i]; ok && a.nb.Cells[i].Type == "code" {
-			a.nb.SetCellOutputs(i, ipynbOutputs(outs))
-		}
-	}
+	a.applyOutputs()
 
 	data, err := a.nb.Marshal()
 	if err != nil {

@@ -45,7 +45,9 @@ jupy notebook.ipynb [more...] # local files, no network
 | `R` / `ctrl-r` | run the selected cell on the attached kernel |
 | `a` / `m` | insert a code / markdown cell after the selection |
 | `d` | delete the selected cell |
-| `c` | attach to a Kaggle Jupyter session (prompts for the URL) |
+| `c` | start a session for the open notebook, pick the accelerator, attach |
+| `C` | attach to a session by pasting its URL (fallback) |
+| `x` | stop the session `c` started |
 | `J` / `K`, pgup/pgdn | scroll the cell stream |
 | `r` | reload the open notebook |
 | `n` | load the next page of notebooks |
@@ -66,29 +68,35 @@ Checked in this order:
 
 ## Running cells on a Kaggle GPU
 
-Kaggle's public API can push a notebook and start a *batch* run, but it does not
-mint the interactive Jupyter URL — that one value only comes out of the browser.
-So the session is started on kaggle.com, where you also pick the accelerator,
-and `jupy` attaches to it:
+`c` starts the session itself. It asks for an accelerator (cpu, T4 x2, P100, L4,
+TPU 1VM v3-8), calls `CreateKernelSession`, polls the returned long-running
+operation, reads the Jupyter URL out of its response and attaches — no browser
+step, no URL to paste.
 
-1. Open the notebook on kaggle.com and start an interactive session with the
-   accelerator you want (T4 x2, P100, TPU — the picker is in the session dialog).
-2. `Run -> Kaggle Jupyter Server -> Manually Connect`, copy the *Colab compatible*
-   or *VS Code compatible* URL.
-3. In `jupy`, press `c` and paste it — or export it as `JUPY_SESSION_URL` and
-   `jupy` attaches on startup.
+The flow, for the record:
 
-`jupy` then lists the session's kernel (starting `python3` if none is running)
-and probes the hardware with `nvidia-smi`, showing e.g. `Tesla T4 x2` in the
-status line. `R` executes the selected cell over the kernel's websocket channel
-and streams stdout, stderr, results and tracebacks into that cell's card. The
-kernel keeps its state between cells, exactly as in the notebook UI; markdown
-cells are skipped. The session ends when Kaggle idles it out, and the URL stops
-working at that point.
+1. `POST /v1/kernels.KernelsApiService/CreateKernelSession` with
+   `{slug: "owner/slug", language, kernelType, machineShape}` returns an
+   `Operation` whose `metadata.kernelSessionId` names the session.
+2. `POST /v1/common.OperationsService/GetOperation` with that operation's name
+   until `done`; `response.jupyterUrl` and `response.tokenizedJupyterUrl` carry
+   the proxy URL. The tokenised form is sometimes a bare host plus `?token=`, so
+   the plain URL with that token is tried first, then the tokenised one.
+3. Attach: list kernels (starting `python3` if none runs), probe the hardware
+   with `nvidia-smi`, and stream cell output over the kernel's websocket.
 
-The URL embeds a session JWT. `jupy` keeps it in memory only — it is never
-written to disk, logged, or shown after the prompt — so treat it as a secret and
-do not paste it into anything you keep around.
+`R` executes the selected cell; stdout, stderr, results and tracebacks land in
+that cell's card, and the kernel keeps state between cells. `x` cancels the
+session so it stops using quota.
+
+Two limits come from Kaggle, not from jupy: only **one** interactive GPU session
+is allowed per account (`Maximum interactive GPU session count of 1 reached`),
+and a session for a notebook that already has one refuses with
+`a session is already running` — in that case press `C` and paste the URL from
+*Run -> Kaggle Jupyter Server*, or stop the session on kaggle.com first.
+
+Either URL embeds a session credential. `jupy` keeps it in memory only — never
+written to disk, logged, or redrawn after the prompt.
 
 ## What runs where
 
@@ -102,13 +110,11 @@ do not paste it into anything you keep around.
   exist in the same kernel the browser is attached to, but the browser's
   notebook file comes from Kaggle's version store, so it keeps showing the old
   code until you push (or edit in the browser).
-- **Output is ephemeral on Kaggle's side.** A run's output exists in the kernel
-  and in `jupy`'s cards; `w` now writes it into the local `.ipynb` too. A push
-  strips outputs (the push API expects cells without them, exactly like
-  `kaggle kernels push`), and Kaggle only stores outputs when a version is saved
-  or run on Kaggle's side — so the notebook on kaggle.com shows code without
-  output. Use "Save Version" in the browser, or push with `SAVE_AND_RUN_ALL`
-  (queues a full run and costs quota), if you want the output stored there.
+- **Output travels with the document.** A run's output exists in the kernel and
+  in `jupy`'s cards; `w` and `P` both write it into the document first, so the
+  local `.ipynb` and the pushed version carry it. `kaggle kernels push` sends
+  cells with `outputs: []`, but the server accepts and keeps outputs, so a
+  `P` version shows what the cells printed.
 
 ## Saving back to Kaggle
 
@@ -116,8 +122,9 @@ do not paste it into anything you keep around.
 is created and nothing is queued. The push reuses the settings of the version
 you opened — private flag, GPU/TPU, internet, docker image, machine shape, and
 the dataset/competition/kernel/model sources — so it will not quietly drop your
-data or flip the notebook public. Code cell outputs are stripped and cell
-sources are joined into one string, which is what the server expects.
+data or flip the notebook public. Cell sources are joined into one string for
+the wire format, and cell outputs from your runs are included: the server keeps
+them, so the version you push shows what the cells printed.
 
 Reload the notebook page to see the new version. If you want the run too, push
 with `SAVE_AND_RUN_ALL` (not wired to a key yet) or press "Save & Run All" in

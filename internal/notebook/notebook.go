@@ -167,11 +167,12 @@ func (nb *Notebook) Marshal() ([]byte, error) {
 	return json.MarshalIndent(nb.doc, "", " ")
 }
 
-// NormalizeForPush prepares a notebook document for the Kaggle push API: code
-// cells are sent without outputs, and each cell's source is joined into one
-// string, both of which the server expects. Everything else in the document is
-// preserved — dropping nbformat or metadata makes Kaggle's notebook editor fail
-// to load the version ("can't access property orig_nbformat").
+// NormalizeForPush prepares a notebook document for the Kaggle push API: each
+// cell's source is joined into one string, which is what the server expects.
+// Everything else is preserved, including code-cell outputs (the server keeps
+// them, so a pushed version shows what the cells printed) and the top-level
+// keys — dropping nbformat or metadata makes Kaggle's editor fail to load the
+// version ("can't access property orig_nbformat").
 func NormalizeForPush(doc []byte) ([]byte, error) {
 	var parsed map[string]any
 	if err := json.Unmarshal(doc, &parsed); err != nil {
@@ -186,9 +187,6 @@ func NormalizeForPush(doc []byte) ([]byte, error) {
 		cell, ok := raw.(map[string]any)
 		if !ok {
 			continue
-		}
-		if kind, _ := cell["cell_type"].(string); kind == "code" {
-			cell["outputs"] = []any{}
 		}
 		if lines, ok := cell["source"].([]any); ok {
 			var b strings.Builder
