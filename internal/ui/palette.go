@@ -55,18 +55,27 @@ func filterCommands(cmds []command, query string) []command {
 }
 
 // palette is the ctrl-p command palette: filter as you type, move with j/k or
-// the arrows, enter runs, esc cancels.
+// the arrows, enter runs, esc cancels. The frame and the background are painted
+// once; only the input and match rows are repainted as keys arrive, so the list
+// underneath does not flicker.
 func (a *app) palette() {
 	all := a.commands()
+
+	l := a.layout()
+	width := clamp(l.w-24, 36, 64)
+	height := clamp(len(all), 1, 10) + 3
+	x := clamp((l.w-width)/2, 0, max(l.w-width, 0))
+	y := clamp(l.h/4, 0, max(l.h-height, 0))
+
+	a.draw()
+	a.drawPaletteFrame(x, y, width, height)
+
 	var query []rune
 	sel := 0
-
 	for {
 		matches := filterCommands(all, string(query))
 		sel = clamp(sel, 0, max(len(matches)-1, 0))
-
-		a.draw()
-		a.drawPalette(query, matches, sel)
+		a.paintPalette(x, y, width, height, query, matches, sel)
 
 		ch := a.scr.GetChar()
 		switch {
@@ -84,12 +93,11 @@ func (a *app) palette() {
 		case ch == goncurses.KEY_UP:
 			sel = clampIndex(sel-1, len(matches))
 		case ch == goncurses.KEY_BACKSPACE, ch == 127, ch == 8:
-			if len(query) > 0 {
-				query = query[:len(query)-1]
-				sel = 0
-			} else {
+			if len(query) == 0 {
 				return
 			}
+			query = query[:len(query)-1]
+			sel = 0
 		case ch == keyCtrlU:
 			query, sel = nil, 0
 		case ch >= 32 && ch < 127:
@@ -99,35 +107,31 @@ func (a *app) palette() {
 	}
 }
 
-func (a *app) drawPalette(query []rune, matches []command, sel int) {
-	l := a.layout()
-	width := clamp(l.w-24, 36, 64)
-	height := clamp(len(matches), 1, 10) + 3
-	x := clamp((l.w-width)/2, 0, max(l.w-width, 0))
-	y := clamp(l.h/4, 0, max(l.h-height, 0))
-
+func (a *app) drawPaletteFrame(x, y, width, height int) {
 	a.panel(x, y, width, height, "command", true)
 	for row := y + 1; row < y+height-1; row++ {
 		a.put(row, x+1, width-2, "", a.th.plain, true)
 	}
+}
 
-	input := "> " + string(query)
-	a.put(y+1, x+2, width-4, input, a.th.label, false)
+// paintPalette repaints the input line and the matches only.
+func (a *app) paintPalette(x, y, width, height int, query []rune, matches []command, sel int) {
+	a.put(y+1, x+2, width-4, "> "+string(query), a.th.label, true)
 
-	if len(matches) == 0 {
-		a.put(y+2, x+2, width-4, "no match", a.th.dim, false)
-		a.scr.Refresh()
-		return
-	}
-	for i, cmd := range matches {
-		if i >= height-3 {
-			break
+	rows := height - 3
+	for i := 0; i < rows; i++ {
+		if i >= len(matches) {
+			a.put(y+2+i, x+1, width-2, "", a.th.plain, true)
+			continue
 		}
-		attr, mark := a.th.plain, "  "
+		attr := a.th.plain
 		if i == sel {
-			attr, mark = a.th.sel, "> "
+			attr = a.th.cursorLine
 		}
-		a.put(y+2+i, x+2, width-4, mark+cmd.name, attr, true)
+		a.put(y+2+i, x+2, width-4, "  "+matches[i].name, attr, true)
+	}
+	if len(matches) == 0 {
+		a.put(y+2, x+2, width-4, "  no match", a.th.dim, true)
 	}
 	a.scr.Refresh()
 }
