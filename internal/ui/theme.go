@@ -11,6 +11,7 @@ type theme struct {
 	dim         goncurses.Char
 	label       goncurses.Char
 	sel         goncurses.Char
+	cursorLine  goncurses.Char
 	border      goncurses.Char
 	focusBorder goncurses.Char
 	warn        goncurses.Char
@@ -37,6 +38,7 @@ func newTheme() theme {
 		dim:         goncurses.A_DIM,
 		label:       goncurses.A_BOLD,
 		sel:         goncurses.A_BOLD,
+		cursorLine:  goncurses.A_REVERSE,
 		border:      goncurses.A_DIM,
 		focusBorder: goncurses.A_NORMAL,
 		warn:        goncurses.A_BOLD,
@@ -98,6 +100,11 @@ func newTheme() theme {
 	t.stderr |= yellow
 	t.result |= green
 	t.err |= red
+
+	// a slightly grey row background, like vim's cursorline
+	if goncurses.Colors() > 236 && goncurses.InitPair(7, -1, 236) == nil {
+		t.cursorLine = goncurses.ColorPair(7)
+	}
 	return t
 }
 
