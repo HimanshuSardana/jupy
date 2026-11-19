@@ -11,16 +11,16 @@ import (
 )
 
 func (a *app) drawDetail(l layout) {
-	a.put(0, l.cardX, l.cardW, a.detailTitle(), a.th.label, false)
+	a.put(0, l.colX, l.colW, a.detailTitle(), a.th.label, false)
 	back := "esc back"
-	a.put(0, l.cardX+l.cardW-len(back), len(back), back, a.th.dim, false)
+	a.put(0, l.colX+l.colW-len(back), len(back), back, a.th.dim, false)
 
 	if a.nb == nil {
-		a.put(l.bodyTop, l.cardX, l.cardW, "no notebook open", a.th.dim, false)
+		a.put(l.bodyTop, l.colX, l.colW, "no notebook open", a.th.dim, false)
 		return
 	}
 	if len(a.cards) == 0 {
-		a.put(l.bodyTop, l.cardX, l.cardW, "this notebook has no cells - a adds one", a.th.dim, false)
+		a.put(l.bodyTop, l.colX, l.colW, "this notebook has no cells - a adds one", a.th.dim, false)
 		return
 	}
 
@@ -29,7 +29,7 @@ func (a *app) drawDetail(l layout) {
 		if y > l.bodyTop+l.bodyRows {
 			break
 		}
-		a.drawCard(l.cardX, y, l.cardW, c, c.cell == a.csel, l.bodyTop, l.bodyTop+l.bodyRows-1)
+		a.drawCard(l.colX, y, l.colW, c, c.cell == a.csel, l.bodyTop, l.bodyTop+l.bodyRows-1)
 		y += c.height + cardGap
 	}
 }

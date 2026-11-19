@@ -444,7 +444,7 @@ func (a *app) applyOutputs() {
 type layout struct {
 	w, h              int
 	bodyTop, bodyRows int
-	cardX, cardW      int
+	colX, colW        int
 	contentW          int
 	statusY, helpY    int
 	listTop, listRows int
@@ -462,23 +462,23 @@ const (
 func (a *app) layout() layout {
 	h, w := a.scr.MaxYX()
 
-	cardW := w - 2*cardMargin
-	if cardW > cardMeasure {
-		cardW = cardMeasure
+	colW := w - 2*cardMargin
+	if colW > cardMeasure {
+		colW = cardMeasure
 	}
-	if cardW < 20 {
-		cardW = max(w-2, 20)
+	if colW < 20 {
+		colW = max(w-2, 20)
 	}
-	if cardW > w-2 {
-		cardW = w - 2
+	if colW > w-2 {
+		colW = w - 2
 	}
-	cardX := (w - cardW) / 2
+	colX := (w - colW) / 2
 
 	return layout{
 		w: w, h: h,
 		bodyTop: 2, bodyRows: max(h-4, 1),
-		cardX: cardX, cardW: cardW,
-		contentW: cardW - 2 - 2*cardPadding,
+		colX: colX, colW: colW,
+		contentW: colW - 2 - 2*cardPadding,
 		statusY:  h - 2, helpY: h - 1,
 		listTop: 3, listRows: max(h-6, 1),
 	}
