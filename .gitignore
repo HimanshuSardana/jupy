@@ -1,2 +1,4 @@
 jupy
 *.ipynb.bak
+*.ipynb
+!internal/notebook/testdata/*.ipynb
