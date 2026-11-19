@@ -331,6 +331,19 @@ func Slugify(title string) string {
 	return strings.Trim(b.String(), "-")
 }
 
+// normalizeRef turns whatever Kaggle answered into "owner/slug". A created
+// notebook comes back as "/code/<owner>/<slug>", which is a URL path, not a ref.
+func normalizeRef(raw, owner, slug string) string {
+	raw = strings.TrimPrefix(strings.TrimSpace(raw), "/")
+	raw = strings.TrimPrefix(raw, "code/")
+	raw = strings.TrimSuffix(raw, "/edit")
+	parts := strings.Split(raw, "/")
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return raw
+	}
+	return owner + "/" + slug
+}
+
 // CreateNotebook creates a private notebook with the given title and returns
 // it. Kaggle derives the page from the slug we send, so the title is slugified.
 func (c *Client) CreateNotebook(title string) (Kernel, error) {
@@ -368,10 +381,7 @@ func (c *Client) CreateNotebook(title string) (Kernel, error) {
 		return Kernel{}, fmt.Errorf("%s", out.Error)
 	}
 
-	ref := out.Ref
-	if ref == "" {
-		ref = req["slug"].(string)
-	}
+	ref := normalizeRef(out.Ref, c.Creds.Username, slug)
 	k := Kernel{
 		ID:       out.KernelID,
 		Ref:      ref,
