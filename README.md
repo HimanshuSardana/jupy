@@ -5,13 +5,12 @@ see its cells rendered as cards, edit a cell in `$VISUAL` / `$EDITOR` (nvim by
 default), and run cells on a Kaggle GPU through a live Jupyter session.
 
 ```
- [1] notebooks (41)                                        sort: last run
-  title                          notebook                     updated
+  title                                        notebook             updated
 ──────────────────────────────────────────────────────────────────────────
 . my notebooks (41)
-> notebook175287c276             notebook175287c276           2026-11-19
-  J*bJev                         j-bjev                       2026-11-04
-  notebooke38a2762d0             notebooke38a2762d0           2026-10-09
+> notebook175287c276                           notebook175287c276   2026-11-19
+  J*bJev                                       j-bjev               2026-11-04
+  notebooke38a2762d0                           notebooke38a2762d0   2026-10-09
  j/k move  enter open  a new  o browser  n more  ctrl-p commands  q quit
 ```
 
@@ -47,7 +46,9 @@ jupy notebook.ipynb [more...] # local files, no network
 ```
 
 `ctrl-p` opens the command palette on either screen: type to filter, `j`/`k` or
-arrows to move, `enter` runs, `esc` cancels, `ctrl-u` clears the query.
+arrows to move, `enter` runs, `esc` cancels, `ctrl-u` clears the query. The
+selected row in a menu is drawn with a grey cursorline background (colour 236 on
+256-colour terminals, reverse video elsewhere).
 
 ### Notebook table
 
