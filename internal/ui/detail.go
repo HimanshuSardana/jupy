@@ -11,16 +11,16 @@ import (
 )
 
 func (a *app) drawDetail(l layout) {
-	a.put(0, 1, l.w-2, a.detailTitle(), a.th.label, false)
+	a.put(0, l.cardX, l.cardW, a.detailTitle(), a.th.label, false)
 	back := "esc back"
-	a.put(0, l.w-1-len(back), len(back), back, a.th.dim, false)
+	a.put(0, l.cardX+l.cardW-len(back), len(back), back, a.th.dim, false)
 
 	if a.nb == nil {
-		a.put(l.bodyTop, 1, l.w-2, "no notebook open", a.th.dim, false)
+		a.put(l.bodyTop, l.cardX, l.cardW, "no notebook open", a.th.dim, false)
 		return
 	}
 	if len(a.cards) == 0 {
-		a.put(l.bodyTop, 1, l.w-2, "this notebook has no cells - a adds one", a.th.dim, false)
+		a.put(l.bodyTop, l.cardX, l.cardW, "this notebook has no cells - a adds one", a.th.dim, false)
 		return
 	}
 
@@ -29,8 +29,8 @@ func (a *app) drawDetail(l layout) {
 		if y > l.bodyTop+l.bodyRows {
 			break
 		}
-		a.drawCard(l.bodyX, y, l.bodyW, c, c.cell == a.csel, l.bodyTop, l.bodyTop+l.bodyRows-1)
-		y += c.height
+		a.drawCard(l.cardX, y, l.cardW, c, c.cell == a.csel, l.bodyTop, l.bodyTop+l.bodyRows-1)
+		y += c.height + cardGap
 	}
 }
 
@@ -53,7 +53,7 @@ func (a *app) scrollFor(rows int) int {
 			height = c.height
 			break
 		}
-		start += c.height
+		start += c.height + cardGap
 	}
 
 	if a.selMove {
@@ -77,9 +77,9 @@ func (a *app) scrollFor(rows int) int {
 		}
 	}
 
-	total := 0
+	total := -(cardGap)
 	for _, c := range a.cards {
-		total += c.height
+		total += c.height + cardGap
 	}
 	return clamp(a.ctop, 0, max(total-rows, 0))
 }
@@ -91,13 +91,14 @@ func (a *app) drawCard(x, y, width int, c card, selected bool, clipTop, clipBott
 	}
 	bottom := y + c.height - 1
 
+	pad := cardPadding
 	if y >= clipTop && y <= clipBottom {
 		a.hline(y, x, width, border, goncurses.ACS_ULCORNER, goncurses.ACS_URCORNER)
-		title := fmt.Sprintf(" %d %s ", c.cell+1, c.tag)
+		title := fmt.Sprintf("%d %s", c.cell+1, c.tag)
 		if c.state != "" {
-			title = fmt.Sprintf(" %d %s - %s ", c.cell+1, c.tag, c.state)
+			title += " - " + c.state
 		}
-		a.put(y, x+2, width-4, title, label, false)
+		a.put(y, x+1+pad, width-2-2*pad, " "+title+" ", label, false)
 	}
 	if bottom >= clipTop && bottom <= clipBottom {
 		a.hline(bottom, x, width, border, goncurses.ACS_LLCORNER, goncurses.ACS_LRCORNER)
@@ -128,7 +129,7 @@ func (a *app) cardRow(row, x, width int, border goncurses.Char, spans []highligh
 	a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
 	a.scr.MoveAddChar(row, x+width-1, goncurses.ACS_VLINE)
 	a.scr.AttrSet(goncurses.A_NORMAL)
-	a.putSpans(row, x+2, width-4, spans)
+	a.putSpans(row, x+1+cardPadding, width-2-2*cardPadding, spans)
 }
 
 func newCard(index int, c notebook.Cell, kind string, width int, outs []jupyter.Event, state string) card {

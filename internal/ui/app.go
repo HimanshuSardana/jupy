@@ -330,7 +330,7 @@ func (a *app) buildCards() {
 	if a.nb == nil {
 		return
 	}
-	width := a.layout().bodyW - 4
+	width := a.layout().contentW
 	if width < 8 {
 		width = 8
 	}
@@ -444,18 +444,42 @@ func (a *app) applyOutputs() {
 type layout struct {
 	w, h              int
 	bodyTop, bodyRows int
-	bodyX, bodyW      int
+	cardX, cardW      int
+	contentW          int
 	statusY, helpY    int
 	listTop, listRows int
 }
 
+// Readable measure: cells sit in a centred column, wide enough to read but not
+// so wide that lines run across a large screen.
+const (
+	cardMargin  = 4
+	cardMeasure = 108
+	cardPadding = 2
+	cardGap     = 1
+)
+
 func (a *app) layout() layout {
 	h, w := a.scr.MaxYX()
+
+	cardW := w - 2*cardMargin
+	if cardW > cardMeasure {
+		cardW = cardMeasure
+	}
+	if cardW < 20 {
+		cardW = max(w-2, 20)
+	}
+	if cardW > w-2 {
+		cardW = w - 2
+	}
+	cardX := (w - cardW) / 2
+
 	return layout{
 		w: w, h: h,
-		bodyTop: 1, bodyRows: max(h-3, 1),
-		bodyX: 0, bodyW: max(w-1, 1),
-		statusY: h - 2, helpY: h - 1,
+		bodyTop: 2, bodyRows: max(h-4, 1),
+		cardX: cardX, cardW: cardW,
+		contentW: cardW - 2 - 2*cardPadding,
+		statusY:  h - 2, helpY: h - 1,
 		listTop: 3, listRows: max(h-6, 1),
 	}
 }
