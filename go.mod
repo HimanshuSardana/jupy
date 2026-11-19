@@ -2,4 +2,7 @@ module github.com/himanshusardana/jupy
 
 go 1.27.3
 
-require github.com/rthornton128/goncurses v0.0.0-20251206192105-7e6d2302acca
+require (
+	github.com/gorilla/websocket v1.5.3
+	github.com/rthornton128/goncurses v0.0.0-20251206192105-7e6d2302acca
+)
