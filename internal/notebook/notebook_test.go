@@ -252,8 +252,8 @@ func TestNormalizeForPush(t *testing.T) {
 	if got := parsed.Cells[0].Source; got != "print(1)\nprint(2)" {
 		t.Errorf("code source = %#v, want a single joined string", got)
 	}
-	if len(parsed.Cells[0].Outputs) != 0 {
-		t.Errorf("outputs must be stripped, got %v", parsed.Cells[0].Outputs)
+	if len(parsed.Cells[0].Outputs) != 1 {
+		t.Errorf("outputs must be kept for the pushed version, got %v", parsed.Cells[0].Outputs)
 	}
 	if got := parsed.Cells[1].Source; got != "# hi\nthere" {
 		t.Errorf("markdown source = %#v", got)
@@ -302,7 +302,11 @@ func TestMarshalThenNormalizeKeepsDocumentShape(t *testing.T) {
 		t.Errorf("source = %#v", first["source"])
 	}
 	if outs, _ := first["outputs"].([]any); len(outs) != 0 {
-		t.Errorf("outputs should be stripped, got %v", outs)
+		// an inserted cell has no output; the point is that existing ones survive
+		t.Errorf("inserted cell should have no outputs, got %v", outs)
+	}
+	if _, ok := parsed["metadata"]; !ok {
+		t.Error("metadata missing")
 	}
 }
 

@@ -282,6 +282,21 @@ func (a *app) openSelectedNotebook() {
 	a.status = fmt.Sprintf("%s - %d cells", nb.Title, len(nb.Cells))
 }
 
+// applyOutputs writes output produced in this session into the document, so
+// saving and pushing both carry what the cells printed.
+func (a *app) applyOutputs() {
+	if a.nb == nil {
+		return
+	}
+	for i := 0; i < len(a.nb.Cells); i++ {
+		outs, ok := a.outputs[i]
+		if !ok || len(outs) == 0 || a.nb.Cells[i].Type != "code" {
+			continue
+		}
+		a.nb.SetCellOutputs(i, ipynbOutputs(outs))
+	}
+}
+
 func (a *app) buildCards() {
 	a.cards = a.cards[:0]
 	if a.nb == nil {
@@ -356,12 +371,7 @@ func (a *app) save() {
 		a.status = "nothing open"
 		return
 	}
-	// keep output produced in this session in the local copy
-	for i := 0; i < len(a.nb.Cells) && len(a.outputs) > 0; i++ {
-		if outs, ok := a.outputs[i]; ok && a.nb.Cells[i].Type == "code" {
-			a.nb.SetCellOutputs(i, ipynbOutputs(outs))
-		}
-	}
+	a.applyOutputs()
 
 	data, err := a.nb.Marshal()
 	if err != nil {

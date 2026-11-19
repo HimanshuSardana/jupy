@@ -145,16 +145,26 @@ func (a *app) pickAccelerator() (kaggle.Accelerator, bool) {
 		}
 	}
 
+	l := a.layout()
+	height := len(options) + 3
+	y := clamp((l.h-height)/2, 0, max(l.h-height, 0))
+
+	a.draw()
+	a.drawAcceleratorBand(l, y, height, options, sel)
+
 	for {
-		a.drawAccelerators(options, sel)
 		ch := a.scr.GetChar()
 		switch ch {
 		case 'j', goncurses.KEY_DOWN:
-			sel = clampIndex(sel+1, len(options))
-			continue
+			if sel < len(options)-1 {
+				sel++
+				a.drawAcceleratorRows(l, y, options, sel)
+			}
 		case 'k', goncurses.KEY_UP:
-			sel = clampIndex(sel-1, len(options))
-			continue
+			if sel > 0 {
+				sel--
+				a.drawAcceleratorRows(l, y, options, sel)
+			}
 		case '\r', '\n', goncurses.KEY_ENTER:
 			return options[sel], true
 		case 27, 'q', 3:
@@ -163,14 +173,9 @@ func (a *app) pickAccelerator() (kaggle.Accelerator, bool) {
 	}
 }
 
-func (a *app) drawAccelerators(options []kaggle.Accelerator, sel int) {
-	l := a.layout()
-	a.draw()
-
-	height := len(options) + 3
-	y := clamp((l.h-height)/2, 0, max(l.h-height, 0))
-
-	// a full-width band, so nothing shows through beside the options
+// drawAcceleratorBand paints the whole picker once: a full-width band so
+// nothing shows through beside the options.
+func (a *app) drawAcceleratorBand(l layout, y, height int, options []kaggle.Accelerator, sel int) {
 	for row := y; row < y+height; row++ {
 		a.put(row, 0, l.w, "", a.th.plain, true)
 	}
@@ -187,16 +192,21 @@ func (a *app) drawAccelerators(options []kaggle.Accelerator, sel int) {
 	}
 	a.put(y, 2, l.w-4, title, a.th.label, false)
 	a.put(y+1, 2, l.w-4, " accelerator", a.th.dim, false)
+	a.put(y+height-1, 2, l.w-4, " enter start    esc cancel    C paste a url instead", a.th.dim, false)
 
+	a.drawAcceleratorRows(l, y, options, sel)
+}
+
+// drawAcceleratorRows repaints only the option rows, so moving the selection
+// does not repaint the screen.
+func (a *app) drawAcceleratorRows(l layout, y int, options []kaggle.Accelerator, sel int) {
 	for i, acc := range options {
 		attr, mark := a.th.plain, "  "
 		if i == sel {
 			attr, mark = a.th.sel, "> "
 		}
-		a.put(y+2+i, 2, l.w-4, mark+acc.Label, attr, false)
+		a.put(y+2+i, 2, l.w-4, mark+acc.Label, attr, true)
 	}
-
-	a.put(y+height-1, 2, l.w-4, " enter start    esc cancel    C paste a url instead", a.th.dim, false)
 	a.scr.Refresh()
 }
 
@@ -447,6 +457,8 @@ func (a *app) push() {
 		a.status = "push needs a kaggle notebook, not a local file"
 		return
 	}
+
+	a.applyOutputs()
 
 	doc, err := a.nb.Marshal()
 	if err != nil {

@@ -110,13 +110,11 @@ written to disk, logged, or redrawn after the prompt.
   exist in the same kernel the browser is attached to, but the browser's
   notebook file comes from Kaggle's version store, so it keeps showing the old
   code until you push (or edit in the browser).
-- **Output is ephemeral on Kaggle's side.** A run's output exists in the kernel
-  and in `jupy`'s cards; `w` now writes it into the local `.ipynb` too. A push
-  strips outputs (the push API expects cells without them, exactly like
-  `kaggle kernels push`), and Kaggle only stores outputs when a version is saved
-  or run on Kaggle's side — so the notebook on kaggle.com shows code without
-  output. Use "Save Version" in the browser, or push with `SAVE_AND_RUN_ALL`
-  (queues a full run and costs quota), if you want the output stored there.
+- **Output travels with the document.** A run's output exists in the kernel and
+  in `jupy`'s cards; `w` and `P` both write it into the document first, so the
+  local `.ipynb` and the pushed version carry it. `kaggle kernels push` sends
+  cells with `outputs: []`, but the server accepts and keeps outputs, so a
+  `P` version shows what the cells printed.
 
 ## Saving back to Kaggle
 
@@ -124,8 +122,9 @@ written to disk, logged, or redrawn after the prompt.
 is created and nothing is queued. The push reuses the settings of the version
 you opened — private flag, GPU/TPU, internet, docker image, machine shape, and
 the dataset/competition/kernel/model sources — so it will not quietly drop your
-data or flip the notebook public. Code cell outputs are stripped and cell
-sources are joined into one string, which is what the server expects.
+data or flip the notebook public. Cell sources are joined into one string for
+the wire format, and cell outputs from your runs are included: the server keeps
+them, so the version you push shows what the cells printed.
 
 Reload the notebook page to see the new version. If you want the run too, push
 with `SAVE_AND_RUN_ALL` (not wired to a key yet) or press "Save & Run All" in
