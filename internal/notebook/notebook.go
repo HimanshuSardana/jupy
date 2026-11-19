@@ -329,3 +329,25 @@ func (c Cell) Preview() string {
 }
 
 func (c Cell) Markdown() bool { return c.Type == "markdown" }
+
+// Blank returns an empty notebook document for a new notebook on Kaggle.
+func Blank(language string) []byte {
+	if language == "" {
+		language = "python"
+	}
+	doc := map[string]any{
+		"cells": []any{},
+		"metadata": map[string]any{
+			"kernelspec": map[string]any{
+				"display_name": "Python 3",
+				"language":     language,
+				"name":         "python3",
+			},
+			"language_info": map[string]any{"name": language},
+		},
+		"nbformat":       4,
+		"nbformat_minor": 5,
+	}
+	raw, _ := json.Marshal(doc)
+	return raw
+}

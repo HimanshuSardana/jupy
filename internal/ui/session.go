@@ -259,11 +259,11 @@ func (a *app) drawAcceleratorBox(l layout, x, y, width, height int, options []ka
 // does not repaint the screen.
 func (a *app) drawAcceleratorRows(x, y, width int, options []kaggle.Accelerator, sel int) {
 	for i, acc := range options {
-		attr, mark := a.th.plain, "  "
+		attr := a.th.plain
 		if i == sel {
-			attr, mark = a.th.sel, "> "
+			attr = a.th.cursorLine
 		}
-		a.put(y+2+i, x+1, width-2, "  "+mark+acc.Label, attr, true)
+		a.put(y+2+i, x+1, width-2, "  "+acc.Label, attr, true)
 	}
 	a.scr.Refresh()
 }
@@ -456,7 +456,7 @@ func (a *app) prompt(label string) (string, bool) {
 		if len(r) > width {
 			r = r[len(r)-width:]
 		}
-		a.put(row, 0, l.w-1, string(r)+" ", a.th.label, false)
+		a.put(row, 0, l.w, string(r)+" ", a.th.label, true)
 		a.scr.Refresh()
 
 		ch := a.scr.GetChar()

@@ -346,3 +346,17 @@ func TestSetCellOutputsSurvivesMarshal(t *testing.T) {
 		t.Errorf("untouched cell 2 lost its original output: %d", len(doc.Cells[2].Outputs))
 	}
 }
+
+func TestBlankNotebookParses(t *testing.T) {
+	raw := Blank("python")
+	nb, err := Parse("new", "new", raw)
+	if err != nil {
+		t.Fatalf("Blank() produced something Parse rejects: %v", err)
+	}
+	if len(nb.Cells) != 0 {
+		t.Errorf("cells = %d", len(nb.Cells))
+	}
+	if _, err := NormalizeForPush(raw); err != nil {
+		t.Errorf("Blank() is not pushable: %v", err)
+	}
+}

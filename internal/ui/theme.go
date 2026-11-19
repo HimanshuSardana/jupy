@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"fmt"
+	"os"
+
 	goncurses "github.com/rthornton128/goncurses"
 
 	"github.com/himanshusardana/jupy/internal/highlight"
@@ -11,6 +14,7 @@ type theme struct {
 	dim         goncurses.Char
 	label       goncurses.Char
 	sel         goncurses.Char
+	cursorLine  goncurses.Char
 	border      goncurses.Char
 	focusBorder goncurses.Char
 	warn        goncurses.Char
@@ -37,6 +41,7 @@ func newTheme() theme {
 		dim:         goncurses.A_DIM,
 		label:       goncurses.A_BOLD,
 		sel:         goncurses.A_BOLD,
+		cursorLine:  goncurses.A_REVERSE,
 		border:      goncurses.A_DIM,
 		focusBorder: goncurses.A_NORMAL,
 		warn:        goncurses.A_BOLD,
@@ -98,6 +103,16 @@ func newTheme() theme {
 	t.stderr |= yellow
 	t.result |= green
 	t.err |= red
+
+	// A slightly grey row background, like vim's cursorline. ANSI colour 0 is
+	// the palette's surface grey (Everforest: #475258, which is also kitty's
+	// selection_background), so the highlight follows the terminal theme instead
+	// of pinning a 256-colour index. JUPY_CURSORLINE_BG overrides it.
+	if bg, ok := cursorlineBackground(); ok {
+		if goncurses.InitPair(7, -1, bg) == nil {
+			t.cursorLine = goncurses.ColorPair(7)
+		}
+	}
 	return t
 }
 
@@ -138,4 +153,18 @@ func (t theme) style(s highlight.Style) goncurses.Char {
 		return t.result
 	}
 	return t.plain
+}
+
+// cursorlineBackground is the ANSI colour used behind the selected row.
+func cursorlineBackground() (int16, bool) {
+	if raw := os.Getenv("JUPY_CURSORLINE_BG"); raw != "" {
+		var n int
+		if _, err := fmt.Sscanf(raw, "%d", &n); err == nil && n >= 0 && n < 256 {
+			return int16(n), true
+		}
+	}
+	if goncurses.Colors() >= 8 {
+		return int16(goncurses.C_BLACK), true
+	}
+	return 0, false
 }

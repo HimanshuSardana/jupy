@@ -176,3 +176,89 @@ func indexOf(h, n string) int {
 	}
 	return -1
 }
+
+func TestSlugify(t *testing.T) {
+	cases := map[string]string{
+		"Titanic EDA":            "titanic-eda",
+		"  My  Notebook!!  ":     "my-notebook",
+		"DL Project (Recursion)": "dl-project-recursion",
+		"already-a-slug":         "already-a-slug",
+		"":                       "",
+		"!!!":                    "",
+	}
+	for in, want := range cases {
+		if got := Slugify(in); got != want {
+			t.Errorf("Slugify(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCreateNotebook(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/kernels.KernelsApiService/SaveKernel" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		raw, _ := io.ReadAll(r.Body)
+		json.Unmarshal(raw, &body)
+		// Kaggle answers with a URL path, not an owner/slug ref
+		w.Write([]byte(`{"ref":"/code/me/my-new-notebook","url":"https://kaggle.com/code/me/my-new-notebook","versionNumber":1,"kernelId":777}`))
+	}))
+	defer srv.Close()
+
+	c := New(Creds{Username: "me", Key: "k"})
+	c.BaseURL = srv.URL
+
+	k, err := c.CreateNotebook("My New Notebook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k.Ref != "me/my-new-notebook" || k.Slug != "my-new-notebook" || k.ID != 777 || !k.Private {
+		t.Errorf("kernel = %+v", k)
+	}
+	if k.Owner != "me" || k.Language != "python" || k.Type != "notebook" {
+		t.Errorf("kernel = %+v", k)
+	}
+
+	if body["slug"] != "me/my-new-notebook" || body["newTitle"] != "My New Notebook" {
+		t.Errorf("body = %v", body)
+	}
+	if body["isPrivate"] != true || body["kernelExecutionType"] != "QUICK_SAVE" {
+		t.Errorf("body = %v", body)
+	}
+	text, _ := body["text"].(string)
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(text), &doc); err != nil {
+		t.Fatalf("pushed text is not a notebook: %v", err)
+	}
+	for _, key := range []string{"cells", "metadata", "nbformat", "nbformat_minor"} {
+		if _, ok := doc[key]; !ok {
+			t.Errorf("new notebook is missing %q: %v", key, doc)
+		}
+	}
+}
+
+func TestNormalizeRef(t *testing.T) {
+	cases := []struct{ raw, want string }{
+		{"/code/me/slug", "me/slug"},
+		{"me/slug", "me/slug"},
+		{"/code/me/slug/edit", "me/slug"},
+		{"", "me/fallback"},
+		{"/code/me", "me/fallback"},
+		{"https://kaggle.com/code/me/slug", "me/fallback"},
+	}
+	for _, tc := range cases {
+		if got := normalizeRef(tc.raw, "me", "fallback"); got != tc.want {
+			t.Errorf("normalizeRef(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+}
+
+func TestCreateNotebookRejectsShortTitle(t *testing.T) {
+	c := New(Creds{Username: "me", Key: "k"})
+	for _, title := range []string{"", "abc", "   ", "!!!"} {
+		if _, err := c.CreateNotebook(title); err == nil {
+			t.Errorf("CreateNotebook(%q) = nil error", title)
+		}
+	}
+}

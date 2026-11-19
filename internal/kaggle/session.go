@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/himanshusardana/jupy/internal/notebook"
 )
 
 // ErrSessionRunning means Kaggle already has a session for this notebook, so
@@ -307,4 +309,90 @@ func findSessionID(raw json.RawMessage) int {
 		return 0
 	}
 	return walk(payload)
+}
+
+// Slugify turns a notebook title into a Kaggle slug: lowercase, dashes for
+// anything that is not a letter or digit.
+func Slugify(title string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(strings.TrimSpace(title)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			dash = false
+		default:
+			if !dash && b.Len() > 0 {
+				b.WriteByte('-')
+				dash = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+// normalizeRef turns whatever Kaggle answered into "owner/slug". A created
+// notebook comes back as "/code/<owner>/<slug>", which is a URL path, not a ref.
+func normalizeRef(raw, owner, slug string) string {
+	raw = strings.TrimPrefix(strings.TrimSpace(raw), "/")
+	raw = strings.TrimPrefix(raw, "code/")
+	raw = strings.TrimSuffix(raw, "/edit")
+	parts := strings.Split(raw, "/")
+	if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+		return raw
+	}
+	return owner + "/" + slug
+}
+
+// CreateNotebook creates a private notebook with the given title and returns
+// it. Kaggle derives the page from the slug we send, so the title is slugified.
+func (c *Client) CreateNotebook(title string) (Kernel, error) {
+	title = strings.TrimSpace(title)
+	if len([]rune(title)) < 5 {
+		return Kernel{}, fmt.Errorf("a notebook title needs at least 5 characters")
+	}
+	slug := Slugify(title)
+	if slug == "" {
+		return Kernel{}, fmt.Errorf("a notebook title needs letters or digits")
+	}
+
+	req := map[string]any{
+		"slug":                c.Creds.Username + "/" + slug,
+		"newTitle":            title,
+		"text":                string(notebook.Blank("python")),
+		"language":            "python",
+		"kernelType":          "notebook",
+		"isPrivate":           true,
+		"enableInternet":      true,
+		"kernelExecutionType": "QUICK_SAVE",
+	}
+
+	var out struct {
+		Ref           string `json:"ref"`
+		URL           string `json:"url"`
+		VersionNumber int    `json:"versionNumber"`
+		KernelID      int    `json:"kernelId"`
+		Error         string `json:"error"`
+	}
+	if err := c.call("SaveKernel", req, &out); err != nil {
+		return Kernel{}, err
+	}
+	if out.Error != "" {
+		return Kernel{}, fmt.Errorf("%s", out.Error)
+	}
+
+	ref := normalizeRef(out.Ref, c.Creds.Username, slug)
+	k := Kernel{
+		ID:       out.KernelID,
+		Ref:      ref,
+		Title:    title,
+		Slug:     slug,
+		Owner:    c.Creds.Username,
+		Private:  true,
+		Internet: true,
+		Language: "python",
+		Type:     "notebook",
+		Version:  out.VersionNumber,
+	}
+	return k, nil
 }
