@@ -32,7 +32,8 @@ func (a *app) editSelectedCell() {
 		a.status = err.Error()
 		return
 	}
-	if source == cell.Source {
+	// editors add a trailing newline on save; that alone is not an edit
+	if strings.TrimRight(source, "\n") == strings.TrimRight(cell.Source, "\n") {
 		a.status = fmt.Sprintf("cell %d unchanged", a.csel+1)
 		return
 	}
