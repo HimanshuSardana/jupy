@@ -79,10 +79,11 @@ type app struct {
 	events    chan execEvent
 	outputs   map[int][]jupyter.Event
 
-	view      view
-	status    string
-	th        theme
-	needsDraw bool
+	view          view
+	status        string
+	quitRequested bool
+	th            theme
+	needsDraw     bool
 
 	// ClearOk is forced when content shifts or an external program has
 	// scribbled on the terminal, so ncurses never patches a stale model.
@@ -156,6 +157,8 @@ func (a *app) loop() error {
 
 const (
 	keyEscape = 27
+	keyCtrlP  = 16
+	keyCtrlN  = 14
 	keyCtrlR  = 18
 	keyCtrlU  = 21
 	keyCtrlC  = 3
@@ -164,6 +167,10 @@ const (
 func (a *app) handle(ch goncurses.Key) bool {
 	if ch == 'q' {
 		return true
+	}
+	if ch == keyCtrlP {
+		a.palette()
+		return a.quitRequested
 	}
 	if a.view == viewList {
 		return a.handleList(ch)
@@ -706,7 +713,7 @@ func scrollInto(sel, off, height, n int) int {
 
 func helpFor(v view) string {
 	if v == viewList {
-		return "j/k move  enter open  a new  o open in browser  n more  q quit"
+		return "j/k move  enter open  a new  o browser  n more  ctrl-p commands  q quit"
 	}
-	return "j/k move  J/K scroll  enter edit  R run  a/m add  d del  P push  esc back  q quit"
+	return "j/k move  J/K scroll  enter edit  R run  a/m add  d del  P push  esc back  ctrl-p commands  q quit"
 }
