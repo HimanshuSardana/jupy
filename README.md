@@ -47,8 +47,11 @@ jupy notebook.ipynb [more...] # local files, no network
 
 `ctrl-p` opens the command palette on either screen: type to filter, `j`/`k` or
 arrows to move, `enter` runs, `esc` cancels, `ctrl-u` clears the query. The
-selected row in a menu is drawn with a grey cursorline background (colour 236 on
-256-colour terminals, reverse video elsewhere).
+selected row is drawn with a grey cursorline background: ANSI colour 0, which
+follows the terminal's palette (on the Everforest kitty theme that is #475258, the
+same as its selection colour). Set `JUPY_CURSORLINE_BG=<0-255>` to pick a
+different colour if a theme's colour 0 is too close to its background; without
+colour support the row falls back to reverse video.
 
 ### Notebook table
 
