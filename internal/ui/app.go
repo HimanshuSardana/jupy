@@ -519,10 +519,11 @@ func (a *app) drawStatus(l layout) {
 	if a.jup != nil {
 		right = "connected: " + a.jup.label()
 	}
-	msgWidth := l.w - 2
+	x, width := l.colX, l.colW
+	msgWidth := width
 	if right != "" && len(right)+2 < msgWidth {
-		a.put(l.statusY, l.w-2-len(right), l.w-2, right, a.th.dim, false)
-		msgWidth = l.w - 4 - len(right)
+		a.put(l.statusY, x+width-len(right), width, right, a.th.dim, false)
+		msgWidth = width - 2 - len(right)
 	}
 
 	msg := a.status
@@ -530,9 +531,9 @@ func (a *app) drawStatus(l layout) {
 		msg = fmt.Sprintf("%d cells edited - P pushes a version, w writes a local copy", a.nb.Dirty())
 	}
 	if msg != "" {
-		a.put(l.statusY, 1, msgWidth, msg, a.th.plain, false)
+		a.put(l.statusY, x, msgWidth, msg, a.th.plain, false)
 	}
-	a.put(l.helpY, 1, l.w-2, helpFor(a.view), a.th.dim, false)
+	a.put(l.helpY, x, width, helpFor(a.view), a.th.dim, false)
 }
 
 func (a *app) drawLogin(l layout) {
