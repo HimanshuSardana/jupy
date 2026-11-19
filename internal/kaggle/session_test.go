@@ -201,7 +201,8 @@ func TestCreateNotebook(t *testing.T) {
 		}
 		raw, _ := io.ReadAll(r.Body)
 		json.Unmarshal(raw, &body)
-		w.Write([]byte(`{"ref":"me/my-new-notebook","url":"https://kaggle.com/code/me/my-new-notebook","versionNumber":1,"kernelId":777}`))
+		// Kaggle answers with a URL path, not an owner/slug ref
+		w.Write([]byte(`{"ref":"/code/me/my-new-notebook","url":"https://kaggle.com/code/me/my-new-notebook","versionNumber":1,"kernelId":777}`))
 	}))
 	defer srv.Close()
 
@@ -233,6 +234,22 @@ func TestCreateNotebook(t *testing.T) {
 	for _, key := range []string{"cells", "metadata", "nbformat", "nbformat_minor"} {
 		if _, ok := doc[key]; !ok {
 			t.Errorf("new notebook is missing %q: %v", key, doc)
+		}
+	}
+}
+
+func TestNormalizeRef(t *testing.T) {
+	cases := []struct{ raw, want string }{
+		{"/code/me/slug", "me/slug"},
+		{"me/slug", "me/slug"},
+		{"/code/me/slug/edit", "me/slug"},
+		{"", "me/fallback"},
+		{"/code/me", "me/fallback"},
+		{"https://kaggle.com/code/me/slug", "me/fallback"},
+	}
+	for _, tc := range cases {
+		if got := normalizeRef(tc.raw, "me", "fallback"); got != tc.want {
+			t.Errorf("normalizeRef(%q) = %q, want %q", tc.raw, got, tc.want)
 		}
 	}
 }
