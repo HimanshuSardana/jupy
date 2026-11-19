@@ -9,39 +9,33 @@ import (
 	"github.com/himanshusardana/jupy/internal/kaggle"
 )
 
-// listColumns lays out the notebook table: a marker gutter, the title, the
-// notebook ref and the last-run date.
-func (a *app) listColumns(w int) (gutter, titleW, slugW, dateW int) {
+// listColumns lays out the notebook table: a marker gutter, a flexible title,
+// then the notebook ref and the last-run date pinned to the right edge.
+func (a *app) listColumns(w int) (gutter, titleW, slugX, slugW, dateW int) {
 	gutter = 2
 	dateW = 10
-	slugW = clamp(w/4, 14, 30)
-	titleW = w - gutter - slugW - dateW - 3
-	if titleW < 12 {
-		titleW = 12
-		slugW = max(w-gutter-titleW-dateW-3, 8)
-	}
-	return gutter, titleW, slugW, dateW
+	slugW = clamp(w/5, 14, 30)
+	slugX = max(w-1-dateW-1-slugW, gutter)
+	titleW = max(slugX-gutter-2, 12)
+	return gutter, titleW, slugX, slugW, dateW
 }
 
 func (a *app) drawList(l layout) {
-	gutter, titleW, slugW, dateW := a.listColumns(l.w)
+	gutter, titleW, slugX, slugW, dateW := a.listColumns(l.w)
 
-	a.put(0, 1, l.w-2, fmt.Sprintf("[1] notebooks (%d)", len(a.nbs)), a.th.label, false)
-	sort := "sort: last run"
-	a.put(0, l.w-1-len(sort), len(sort), sort, a.th.dim, false)
-
-	header := strings.Repeat(" ", gutter) + pad("title", titleW) + " " + pad("notebook", slugW) + " " + pad("updated", dateW)
-	a.put(1, 0, l.w, header, a.th.dim, false)
-	a.ruleRow(2, l.w, a.th.border)
+	a.put(0, gutter, titleW, "title", a.th.dim, false)
+	a.put(0, slugX, slugW, "notebook", a.th.dim, false)
+	a.put(0, l.w-1-dateW, dateW, "updated", a.th.dim, false)
+	a.ruleRow(1, l.w, a.th.border)
 
 	// group header, like a table's section row
 	a.scr.AttrSet(a.th.dim)
-	a.scr.MoveAddChar(3, 0, goncurses.ACS_DARROW)
+	a.scr.MoveAddChar(2, 0, goncurses.ACS_DARROW)
 	a.scr.AttrSet(goncurses.A_NORMAL)
-	a.put(3, gutter, l.w-gutter, fmt.Sprintf("my notebooks (%d)", len(a.nbs)), a.th.dim, false)
+	a.put(2, gutter, l.w-gutter, fmt.Sprintf("my notebooks (%d)", len(a.nbs)), a.th.dim, false)
 
 	if len(a.nbs) == 0 {
-		a.put(l.listTop, gutter, l.w-gutter, "no notebooks yet - press a to create one", a.th.dim, false)
+		a.put(l.listTop, 0, l.w, "no notebooks yet - press a to create one", a.th.dim, false)
 		return
 	}
 
@@ -56,11 +50,12 @@ func (a *app) drawList(l layout) {
 			attr, mark = a.th.sel, "> "
 		}
 
-		row := mark + pad(k.Title, titleW) + " " + pad(k.Slug, slugW) + " "
+		a.put(l.listTop+i, 0, gutter, mark, attr, false)
+		a.put(l.listTop+i, gutter, titleW, k.Title, attr, false)
+		a.put(l.listTop+i, slugX, slugW, k.Slug, a.th.dim, false)
 		if t := k.LastRunTime(); !t.IsZero() {
-			row += pad(t.Format("2006-01-02"), dateW)
+			a.put(l.listTop+i, l.w-1-dateW, dateW, t.Format("2006-01-02"), a.th.dim, false)
 		}
-		a.put(l.listTop+i, 0, l.w, row, attr, false)
 	}
 }
 
