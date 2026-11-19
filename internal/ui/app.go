@@ -58,6 +58,11 @@ type app struct {
 	where  focus
 	status string
 	th     theme
+
+	// ClearOk is forced when content shifts or an external program has
+	// scribbled on the terminal, so ncurses never patches a stale model.
+	lastCtop, lastNoff int
+	forceClear         bool
 }
 
 func Run(cfg Config) error {
@@ -364,7 +369,7 @@ func (a *app) layout() layout {
 		w: w, h: h,
 		boxTop: 1, boxBottom: h - 3,
 		listX: 0, listW: listW,
-		bodyX: listW + 1, bodyW: w - listW - 1,
+		bodyX: listW + 1, bodyW: max(w-listW-2, 1),
 		innerTop: 2, listRows: max(h-5, 1),
 		bodyTop: 1, bodyRows: max(h-3, 1),
 	}
@@ -378,6 +383,16 @@ func (a *app) draw() {
 		a.put(0, 0, l.w, fmt.Sprintf("terminal too small (need %dx%d) - press q", minWidth, minHeight), a.th.warn, false)
 		a.scr.Refresh()
 		return
+	}
+
+	a.noff = scrollInto(a.nsel, a.noff, l.listRows, len(a.nbs))
+	if a.nb != nil && len(a.cards) > 0 {
+		a.ctop = a.scrollFor(l.bodyRows)
+	}
+	if a.forceClear || a.ctop != a.lastCtop || a.noff != a.lastNoff {
+		a.scr.ClearOk(true)
+		a.forceClear = false
+		a.lastCtop, a.lastNoff = a.ctop, a.noff
 	}
 
 	a.drawLogin(l)
@@ -395,8 +410,8 @@ func (a *app) drawLogin(l layout) {
 	if name == "" {
 		name = "(local files)"
 	}
-	a.put(0, 1, l.w-1, prefix, a.th.dim, false)
-	a.put(0, 1+len(prefix), l.w-1-len(prefix), name, a.th.label, false)
+	a.put(0, 1, l.w-2, prefix, a.th.dim, false)
+	a.put(0, 1+len(prefix), l.w-2-len(prefix), name, a.th.label, false)
 }
 
 // panel draws a box with its label sitting in the top border.
@@ -439,7 +454,6 @@ func (a *app) hline(y, x, width int, attr goncurses.Char, left, right goncurses.
 
 func (a *app) drawNotebooks(l layout) {
 	x, width, top, rows := l.listX+1, l.listW-2, l.innerTop, l.listRows
-	a.noff = scrollInto(a.nsel, a.noff, rows, len(a.nbs))
 
 	for i := 0; i < rows; i++ {
 		idx := a.noff + i
@@ -471,7 +485,6 @@ func (a *app) drawBody(l layout) {
 		return
 	}
 
-	a.ctop = a.scrollFor(rows)
 	y := top - a.ctop
 	for _, c := range a.cards {
 		if y > top+rows {
@@ -569,9 +582,9 @@ func (a *app) putSpans(y, x, width int, spans []highlight.Span) {
 
 func (a *app) drawStatus(l layout) {
 	if a.status != "" {
-		a.put(l.h-2, 1, l.w-1, a.status, a.th.plain, false)
+		a.put(l.h-2, 1, l.w-2, a.status, a.th.plain, false)
 	}
-	a.put(l.h-1, 1, l.w-1, helpLine, a.th.dim, false)
+	a.put(l.h-1, 1, l.w-2, helpLine, a.th.dim, false)
 }
 
 func (a *app) put(y, x, width int, s string, attr goncurses.Char, fill bool) {

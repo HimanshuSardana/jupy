@@ -88,6 +88,7 @@ func (a *app) runEditor(cell *notebook.Cell) (string, error) {
 	}
 	a.scr = scr
 	a.th = newTheme()
+	a.forceClear = true
 
 	out, readErr := os.ReadFile(codePath)
 	if readErr != nil {
