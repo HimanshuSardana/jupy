@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
 
 type Cell struct {
 	Type   string
 	Source string
+	Output string
 	Edited bool
 }
 
@@ -44,7 +46,11 @@ func Parse(title, ref string, src []byte) (*Notebook, error) {
 	for _, rc := range rawCells {
 		cell, _ := rc.(map[string]any)
 		kind, _ := cell["cell_type"].(string)
-		nb.Cells = append(nb.Cells, Cell{Type: kind, Source: sourceText(cell["source"])})
+		nb.Cells = append(nb.Cells, Cell{
+			Type:   kind,
+			Source: sourceText(cell["source"]),
+			Output: cellOutput(cell),
+		})
 	}
 	return nb, nil
 }
@@ -70,6 +76,62 @@ func language(doc map[string]any) string {
 		}
 	}
 	return "python"
+}
+
+// cellOutput flattens a cell's outputs into plain text: stream text, text/plain
+// representations, and error tracebacks.
+func cellOutput(cell map[string]any) string {
+	raw, _ := cell["outputs"].([]any)
+	var parts []string
+	for _, o := range raw {
+		out, _ := o.(map[string]any)
+		switch kind, _ := out["output_type"].(string); kind {
+		case "stream":
+			parts = append(parts, textOf(out["text"]))
+		case "execute_result", "display_data", "update_display_data":
+			data, _ := out["data"].(map[string]any)
+			if text := textOf(data["text/plain"]); text != "" {
+				parts = append(parts, text)
+			} else if _, ok := data["image/png"]; ok {
+				parts = append(parts, "[image/png output]")
+			}
+		case "error":
+			name, _ := out["ename"].(string)
+			value, _ := out["evalue"].(string)
+			parts = append(parts, strings.TrimSpace(name+": "+value))
+			if tb := textOf(out["traceback"]); tb != "" {
+				parts = append(parts, tb)
+			}
+		}
+	}
+
+	var kept []string
+	for _, p := range parts {
+		if p = strings.TrimRight(stripANSI(p), "\n"); p != "" {
+			kept = append(kept, p)
+		}
+	}
+	return strings.Join(kept, "\n")
+}
+
+func textOf(v any) string {
+	switch s := v.(type) {
+	case string:
+		return s
+	case []any:
+		var b strings.Builder
+		for _, item := range s {
+			b.WriteString(textOf(item))
+		}
+		return b.String()
+	}
+	return ""
+}
+
+var ansiPattern = regexp.MustCompile("\x1b\\[[0-9;?]*[a-zA-Z]")
+
+func stripANSI(s string) string {
+	return ansiPattern.ReplaceAllString(s, "")
 }
 
 func sourceText(v any) string {

@@ -73,8 +73,8 @@ func initScreen() (*goncurses.Window, error) {
 }
 
 const (
-	helpLine  = "j/k move  tab pane  enter open  e edit in nvim  r reload  n more  w save  q quit"
-	dividerCh = '|'
+	helpLine = "j/k move  tab pane  enter open  e edit in nvim  r reload  n more  w save  q quit"
+	gutter   = 2
 )
 
 func (a *app) loop() error {
@@ -263,7 +263,7 @@ func (a *app) draw() {
 	a.scr.Erase()
 
 	if h < 12 || w < 46 {
-		a.put(0, 0, w, "terminal too small (need 46x12) - press q", a.th.title, true)
+		a.put(0, 0, w, " terminal too small (need 46x12) - press q", a.th.label, false)
 		a.scr.Refresh()
 		return
 	}
@@ -272,10 +272,6 @@ func (a *app) draw() {
 
 	a.drawTitle(w)
 	a.drawNotebooks(listW, cellsTop, prevRows+cellsRows+1)
-	a.put(1, listW, 1, string(dividerCh), a.th.dim, false)
-	for y := 1; y < h-2; y++ {
-		a.put(y, listW, 1, string(dividerCh), a.th.dim, false)
-	}
 	a.drawCells(listW, cellsTop, cellsRows, prevTop, prevRows)
 	a.drawStatus(h, w)
 	a.scr.Refresh()
@@ -297,22 +293,21 @@ func (a *app) layout() (listW, cellsTop, cellsRows, prevTop, prevRows int) {
 }
 
 func (a *app) drawTitle(w int) {
-	title := "jupy"
+	label := "jupy"
 	if a.cfg.User != "" {
-		title += "  @" + a.cfg.User
+		label += "  @" + a.cfg.User
 	}
 	if a.nb != nil {
-		title += "  " + a.nb.Title
+		label += "  " + a.nb.Title
 		if n := a.nb.Dirty(); n > 0 {
-			title += fmt.Sprintf("  [%d edited]", n)
+			label += fmt.Sprintf("  [%d edited]", n)
 		}
 	}
-	a.put(0, 0, w, " "+title, a.th.title, true)
+	a.section(0, 0, w, label, true)
 }
 
 func (a *app) drawNotebooks(listW, top, rows int) {
-	header := fmt.Sprintf(" Notebooks (%d)", len(a.nbs))
-	a.put(1, 0, listW, header, a.th.headerFor(a.where == focusNotebooks), true)
+	a.section(1, 0, listW, fmt.Sprintf("Notebooks (%d)", len(a.nbs)), a.where == focusNotebooks)
 
 	a.noff = scrollInto(a.nsel, a.noff, rows, len(a.nbs))
 	for i := 0; i < rows; i++ {
@@ -322,33 +317,36 @@ func (a *app) drawNotebooks(listW, top, rows int) {
 		}
 		k := a.nbs[idx]
 		selected := idx == a.nsel && a.where == focusNotebooks
-		attr := a.th.row(selected)
+		attr := a.th.normal
+		mark := "  "
+		if selected {
+			attr, mark = a.th.sel, "> "
+		}
 
-		row := " " + k.Title
+		row := mark + k.Title
 		if b := k.Badges(); b != "" {
 			row += "  " + b
 		}
-		a.put(top+i, 0, listW-11, row, attr, true)
-		a.put(top+i, listW-11, listW, strings.Repeat(" ", 10), attr, true)
+		a.put(top+i, 0, listW-11, row, attr, false)
 		if t := k.LastRunTime(); !t.IsZero() {
-			a.put(top+i, listW-11, 10, t.Format("2006-01-02"), attr, true)
+			a.put(top+i, listW-10, 10, t.Format("2006-01-02"), a.th.dim, false)
 		}
 	}
 }
 
 func (a *app) drawCells(listW, top, rows, prevTop, prevRows int) {
-	x := listW + 1
+	x := listW + gutter
 	width := a.scrMaxX() - x
 
-	header := " Cells"
+	label := "Cells"
 	if a.nb != nil {
-		header = fmt.Sprintf(" Cells (%d)", len(a.nb.Cells))
+		label = fmt.Sprintf("Cells (%d)", len(a.nb.Cells))
 	}
-	a.put(1, x, width, header, a.th.headerFor(a.where == focusCells), true)
+	a.section(1, x, width, label, a.where == focusCells)
 
 	if a.nb == nil {
-		a.put(top, x, width, " select a notebook and press enter", a.th.dim, false)
-		a.put(prevTop, x, width, " Preview", a.th.header, true)
+		a.put(top, x, width, "select a notebook and press enter", a.th.dim, false)
+		a.section(prevTop, x, width, "Preview", false)
 		return
 	}
 
@@ -360,25 +358,30 @@ func (a *app) drawCells(listW, top, rows, prevTop, prevRows int) {
 		}
 		c := a.nb.Cells[idx]
 		selected := idx == a.csel && a.where == focusCells
+		attr := a.th.normal
 		mark := " "
-		if c.Edited {
-			mark = "*"
+		if selected {
+			attr, mark = a.th.sel, ">"
 		}
-		row := fmt.Sprintf(" %s%3d %-3s %s", mark, idx+1, c.Tag(), c.Preview())
-		a.put(top+i, x, width, row, a.th.row(selected), true)
+		edited := " "
+		if c.Edited {
+			edited = "*"
+		}
+		row := fmt.Sprintf("%s%s%3d %-3s %s", mark, edited, idx+1, c.Tag(), c.Preview())
+		a.put(top+i, x, width, row, attr, false)
 	}
 
 	cell := a.nb.Cells[a.csel]
-	header = fmt.Sprintf(" Cell %d of %d - %s", a.csel+1, len(a.nb.Cells), cell.Type)
 	lines := a.previewLines()
+	label = fmt.Sprintf("Cell %d of %d - %s", a.csel+1, len(a.nb.Cells), cell.Type)
 	if max := len(lines) - prevRows; max > 0 {
-		header += fmt.Sprintf("  [%d%%]", a.pvOff*100/max)
+		label += fmt.Sprintf("  [%d%%]", a.pvOff*100/max)
 	}
-	a.put(prevTop, x, width, header, a.th.header, true)
+	a.section(prevTop, listW+gutter, prevRows+1, label, true)
 
 	lines = lines[a.pvOff:]
 	for i := 0; i < prevRows && i < len(lines); i++ {
-		a.put(prevTop+1+i, x, width, " "+lines[i], a.th.normal, true)
+		a.put(prevTop+1+i, x, width, lines[i], a.th.normal, false)
 	}
 }
 
@@ -398,8 +401,33 @@ func (a *app) drawStatus(h, w int) {
 	if msg == "" {
 		msg = helpLine
 	}
-	a.put(h-2, 0, w, " "+msg, a.th.status, true)
-	a.put(h-1, 0, w, " "+helpLine, a.th.dim, true)
+	a.put(h-2, 0, w, msg, a.th.normal, false)
+	a.put(h-1, 0, w, helpLine, a.th.dim, false)
+}
+
+// section draws a label and a hairline rule running to the right edge, the
+// card-header treatment used instead of filled panel backgrounds.
+func (a *app) section(y, x, width int, label string, focused bool) {
+	attr := a.th.labelFor(focused)
+	text := " " + label + " "
+	a.put(y, x, width, text, attr, false)
+	used := len([]rune(sanitize(text)))
+	a.rule(y, x+used, width-used, attr)
+}
+
+func (a *app) rule(y, x, width int, attr goncurses.Char) {
+	h, w := a.scr.MaxYX()
+	if width <= 0 || y < 0 || y >= h || x < 0 || x >= w {
+		return
+	}
+	if x+width > w {
+		width = w - x
+	}
+	a.scr.AttrSet(attr)
+	for i := 0; i < width; i++ {
+		a.scr.MoveAddChar(y, x+i, goncurses.ACS_HLINE)
+	}
+	a.scr.AttrSet(goncurses.A_NORMAL)
 }
 
 func (a *app) scrMaxX() int {

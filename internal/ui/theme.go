@@ -2,10 +2,11 @@ package ui
 
 import goncurses "github.com/rthornton128/goncurses"
 
+// theme is the accent set for the rule-under-label treatment: labels carry the
+// colour and a hairline rule, content sits on the terminal's own background.
 type theme struct {
-	title  goncurses.Char
-	header goncurses.Char
-	status goncurses.Char
+	label  goncurses.Char
+	rule   goncurses.Char
 	sel    goncurses.Char
 	dim    goncurses.Char
 	normal goncurses.Char
@@ -13,10 +14,9 @@ type theme struct {
 
 func newTheme() theme {
 	t := theme{
-		title:  goncurses.A_BOLD | goncurses.A_REVERSE,
-		header: goncurses.A_BOLD,
-		status: goncurses.A_REVERSE,
-		sel:    goncurses.A_REVERSE,
+		label:  goncurses.A_BOLD,
+		rule:   goncurses.A_NORMAL,
+		sel:    goncurses.A_BOLD,
 		dim:    goncurses.A_DIM,
 		normal: goncurses.A_NORMAL,
 	}
@@ -25,30 +25,22 @@ func newTheme() theme {
 		return t
 	}
 	goncurses.UseDefaultColors()
-	if goncurses.InitPair(1, goncurses.C_CYAN, -1) != nil ||
-		goncurses.InitPair(2, goncurses.C_BLACK, goncurses.C_CYAN) != nil {
+	if goncurses.InitPair(1, goncurses.C_MAGENTA, -1) != nil ||
+		goncurses.InitPair(2, goncurses.C_CYAN, -1) != nil {
 		return t
 	}
 
-	head := goncurses.ColorPair(1)
+	accent := goncurses.ColorPair(1)
 	pick := goncurses.ColorPair(2)
-	t.title |= head
-	t.header |= head
-	t.status |= head
+	t.label |= accent
+	t.rule |= accent
 	t.sel |= pick
 	return t
 }
 
-func (t theme) headerFor(focused bool) goncurses.Char {
+func (t theme) labelFor(focused bool) goncurses.Char {
 	if focused {
-		return t.header
+		return t.label
 	}
 	return t.dim
-}
-
-func (t theme) row(selected bool) goncurses.Char {
-	if selected {
-		return t.sel
-	}
-	return t.normal
 }

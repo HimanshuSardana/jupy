@@ -100,3 +100,28 @@ func TestMarshalRoundTripKeepsUnknownFields(t *testing.T) {
 		t.Error("code cell outputs/execution_count dropped")
 	}
 }
+
+func TestParseOutputs(t *testing.T) {
+	doc := `{"cells":[
+	 {"cell_type":"code","source":"print(1)",
+	  "outputs":[
+	    {"output_type":"stream","name":"stdout","text":["1\n","2\n"]},
+	    {"output_type":"execute_result","data":{"text/plain":["42"]},"metadata":{}},
+	    {"output_type":"display_data","data":{"image/png":"iVBORw0K"}},
+	    {"output_type":"error","ename":"ValueError","evalue":"bad","traceback":["\u001b[31mValueError\u001b[0m: bad"]}
+	  ]},
+	 {"cell_type":"markdown","source":"# t"}
+	],"metadata":{},"nbformat":4,"nbformat_minor":5}`
+
+	nb, err := Parse("t", "t", []byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "1\n2\n42\n[image/png output]\nValueError: bad\nValueError: bad"
+	if got := nb.Cells[0].Output; got != want {
+		t.Errorf("output = %q, want %q", got, want)
+	}
+	if nb.Cells[1].Output != "" {
+		t.Errorf("markdown output = %q", nb.Cells[1].Output)
+	}
+}
