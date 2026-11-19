@@ -9,6 +9,7 @@ import (
 
 	goncurses "github.com/rthornton128/goncurses"
 
+	"github.com/himanshusardana/jupy/internal/browser"
 	"github.com/himanshusardana/jupy/internal/highlight"
 	"github.com/himanshusardana/jupy/internal/jupyter"
 	"github.com/himanshusardana/jupy/internal/kaggle"
@@ -37,6 +38,41 @@ type execEvent struct {
 	done  bool
 	count int
 	err   error
+}
+
+// notebookURL is the kaggle.com page for the open notebook.
+func notebookURL(meta kaggle.Kernel) string {
+	ref := meta.Ref
+	if ref == "" && meta.Owner != "" && meta.Slug != "" {
+		ref = meta.Owner + "/" + meta.Slug
+	}
+	if ref == "" && meta.Slug != "" {
+		ref = meta.Slug
+	}
+	// a kaggle ref is exactly "owner/slug"; local paths are not pages
+	parts := strings.Split(ref, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" || strings.Contains(parts[1], ".") {
+		return ""
+	}
+	return "https://www.kaggle.com/code/" + ref
+}
+
+// openInBrowser shows the open notebook on kaggle.com.
+func (a *app) openInBrowser() {
+	if a.nb == nil {
+		a.status = "open a notebook first"
+		return
+	}
+	url := notebookURL(a.curMeta)
+	if url == "" {
+		a.status = "this notebook has no kaggle page"
+		return
+	}
+	if err := browser.Open(url); err != nil {
+		a.status = err.Error()
+		return
+	}
+	a.status = "opened " + url
 }
 
 // connect starts a Kaggle session for the open notebook on the accelerator the

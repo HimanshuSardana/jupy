@@ -37,7 +37,7 @@ const (
 )
 
 const (
-	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  P push  c session  C url  x stop  q quit"
+	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  P push  c session  o open  q quit"
 	minWidth  = 60
 	minHeight = 14
 )
@@ -191,6 +191,8 @@ func (a *app) handle(ch goncurses.Key) bool {
 		a.connectByURL()
 	case 'x':
 		a.stopSession()
+	case 'o':
+		a.openInBrowser()
 	case 'r':
 		a.reload()
 	case 'n':

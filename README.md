@@ -48,6 +48,7 @@ jupy notebook.ipynb [more...] # local files, no network
 | `c` | start a session for the open notebook, pick the accelerator, attach |
 | `C` | attach to a session by pasting its URL (fallback) |
 | `x` | stop the session `c` started |
+| `o` | open the notebook on kaggle.com in the browser |
 | `J` / `K`, pgup/pgdn | scroll the cell stream |
 | `r` | reload the open notebook |
 | `n` | load the next page of notebooks |
@@ -97,6 +98,13 @@ and a session for a notebook that already has one refuses with
 
 Either URL embeds a session credential. `jupy` keeps it in memory only — never
 written to disk, logged, or redrawn after the prompt.
+
+## Opening the notebook
+
+`o` launches `https://www.kaggle.com/code/<owner>/<slug>` for the notebook you
+have open, using `$BROWSER` if set, else `open` on macOS and `xdg-open`
+elsewhere. Local `.ipynb` files have no Kaggle page, so the status line says so
+instead.
 
 ## What runs where
 
