@@ -14,7 +14,8 @@ import (
 )
 
 // Config is everything the browser needs: the notebook list, how to fetch a
-// notebook's cells, and optionally a Jupyter session to attach to on start.
+// notebook's cells, how to write to Kaggle, and optionally a Jupyter session to
+// attach to on start.
 type Config struct {
 	User      string
 	Session   string
@@ -27,17 +28,21 @@ type Config struct {
 	// machine shape and returns the Jupyter URLs to try, best first.
 	StartSession func(kaggle.Kernel, string) (kaggle.StartedSession, error)
 	StopSession  func(id int) error
+
+	// CreateNotebook creates a private notebook and returns it.
+	CreateNotebook func(title string) (kaggle.Kernel, error)
 }
 
-type focus int
+// view is the screen the app is showing: the notebook table, or one notebook's
+// cells.
+type view int
 
 const (
-	focusNotebooks focus = iota
-	focusCells
+	viewList view = iota
+	viewDetail
 )
 
 const (
-	helpLine  = "j/k move  J/K scroll  tab pane  enter edit  R run  a add  m md  d del  P push  c session  o open  q quit"
 	minWidth  = 60
 	minHeight = 14
 )
@@ -74,7 +79,7 @@ type app struct {
 	events    chan execEvent
 	outputs   map[int][]jupyter.Event
 
-	where     focus
+	view      view
 	status    string
 	th        theme
 	needsDraw bool
@@ -149,18 +154,63 @@ func (a *app) loop() error {
 	}
 }
 
+const (
+	keyEscape = 27
+	keyCtrlR  = 18
+	keyCtrlU  = 21
+	keyCtrlC  = 3
+)
+
 func (a *app) handle(ch goncurses.Key) bool {
+	if ch == 'q' {
+		return true
+	}
+	if a.view == viewList {
+		return a.handleList(ch)
+	}
+	return a.handleDetail(ch)
+}
+
+func (a *app) handleList(ch goncurses.Key) bool {
 	switch ch {
-	case 'q', 3:
+	case keyCtrlC:
 		return true
 	case 'j', goncurses.KEY_DOWN:
-		a.move(1)
+		a.nsel = clampIndex(a.nsel+1, len(a.nbs))
 	case 'k', goncurses.KEY_UP:
-		a.move(-1)
+		a.nsel = clampIndex(a.nsel-1, len(a.nbs))
 	case 'g', goncurses.KEY_HOME:
-		a.jump(0)
+		a.nsel = clampIndex(0, len(a.nbs))
 	case 'G', goncurses.KEY_END:
-		a.jump(-1)
+		a.nsel = jumpIndex(-1, len(a.nbs))
+	case 'n':
+		a.more()
+	case 'r':
+		a.status = fmt.Sprintf("%d notebooks, refreshed on start", len(a.nbs))
+	case '\r', '\n', goncurses.KEY_ENTER, 'l', goncurses.KEY_RIGHT:
+		a.openSelectedNotebook()
+	case 'a':
+		a.newNotebook()
+	case 'o':
+		a.openInBrowser()
+	}
+	return false
+}
+
+func (a *app) handleDetail(ch goncurses.Key) bool {
+	switch ch {
+	case keyCtrlC:
+		return true
+	case keyEscape, 'h', goncurses.KEY_LEFT:
+		a.backToList()
+	case 'j', goncurses.KEY_DOWN:
+		a.moveCell(1)
+	case 'k', goncurses.KEY_UP:
+		a.moveCell(-1)
+	case 'g', goncurses.KEY_HOME:
+		a.jumpCell(0)
+	case 'G', goncurses.KEY_END:
+		a.jumpCell(-1)
 	case 'J':
 		a.scroll(1)
 	case 'K':
@@ -169,15 +219,9 @@ func (a *app) handle(ch goncurses.Key) bool {
 		a.scroll(a.layout().bodyRows / 2)
 	case goncurses.KEY_PAGEUP:
 		a.scroll(-a.layout().bodyRows / 2)
-	case '\t', 'l', goncurses.KEY_RIGHT:
-		a.where = focusCells
-	case goncurses.KEY_BTAB, 'h', goncurses.KEY_LEFT:
-		a.where = focusNotebooks
-	case '\r', '\n', goncurses.KEY_ENTER:
-		a.enter()
-	case 'e':
+	case '\r', '\n', goncurses.KEY_ENTER, 'e':
 		a.editSelectedCell()
-	case 'R', 18:
+	case 'R', keyCtrlR:
 		a.runCell(a.csel)
 	case 'a':
 		a.addCell("code")
@@ -185,54 +229,43 @@ func (a *app) handle(ch goncurses.Key) bool {
 		a.addCell("markdown")
 	case 'd':
 		a.deleteCell()
+	case 'P':
+		a.push()
+	case 'w':
+		a.save()
+	case 'x':
+		a.stopSession()
 	case 'c':
 		a.connect()
 	case 'C':
 		a.connectByURL()
-	case 'x':
-		a.stopSession()
 	case 'o':
 		a.openInBrowser()
 	case 'r':
 		a.reload()
-	case 'n':
-		a.more()
-	case 'w':
-		a.save()
-	case 'P':
-		a.push()
 	}
 	return false
 }
 
-func (a *app) enter() {
-	if a.where == focusNotebooks {
-		a.openSelectedNotebook()
-		return
-	}
-	a.editSelectedCell()
+func (a *app) backToList() {
+	a.view = viewList
+	a.status = ""
+	a.ctop = 0
+	a.forceClear = true
 }
 
-func (a *app) move(delta int) {
-	if a.where == focusNotebooks {
-		a.nsel = clampIndex(a.nsel+delta, len(a.nbs))
-		return
-	}
+func (a *app) moveCell(delta int) {
 	a.csel = clampIndex(a.csel+delta, len(a.cards))
 	a.selMove = true
 }
 
-func (a *app) jump(to int) {
-	if a.where == focusNotebooks {
-		a.nsel = jumpIndex(to, len(a.nbs))
-		return
-	}
+func (a *app) jumpCell(to int) {
 	a.csel = jumpIndex(to, len(a.cards))
 	a.selMove = true
 }
 
 func (a *app) scroll(delta int) {
-	if a.nb == nil || delta == 0 {
+	if a.view != viewDetail || a.nb == nil || delta == 0 {
 		return
 	}
 	total := 0
@@ -264,7 +297,6 @@ func (a *app) openSelectedNotebook() {
 		a.status = err.Error()
 		return
 	}
-	a.curMeta = meta
 	if nb.Title == "" {
 		nb.Title = k.Title
 	}
@@ -272,6 +304,7 @@ func (a *app) openSelectedNotebook() {
 		a.nbs[a.nsel].Language = nb.Language
 	}
 	a.nb = nb
+	a.curMeta = meta
 	a.csel, a.ctop, a.selMove = 0, 0, true
 	a.outputs = map[int][]jupyter.Event{}
 	for i, c := range nb.Cells {
@@ -280,23 +313,9 @@ func (a *app) openSelectedNotebook() {
 		}
 	}
 	a.buildCards()
-	a.where = focusCells
+	a.view = viewDetail
+	a.forceClear = true
 	a.status = fmt.Sprintf("%s - %d cells", nb.Title, len(nb.Cells))
-}
-
-// applyOutputs writes output produced in this session into the document, so
-// saving and pushing both carry what the cells printed.
-func (a *app) applyOutputs() {
-	if a.nb == nil {
-		return
-	}
-	for i := 0; i < len(a.nb.Cells); i++ {
-		outs, ok := a.outputs[i]
-		if !ok || len(outs) == 0 || a.nb.Cells[i].Type != "code" {
-			continue
-		}
-		a.nb.SetCellOutputs(i, ipynbOutputs(outs))
-	}
 }
 
 func (a *app) buildCards() {
@@ -398,85 +417,39 @@ func (a *app) save() {
 	a.status = "wrote " + name
 }
 
-func newCard(index int, c notebook.Cell, kind string, width int, outs []jupyter.Event, state string) card {
-	logical := highlight.Lines(c.Source, kind)
-	var lines [][]highlight.Span
-	for _, line := range logical {
-		lines = append(lines, wrapSpans(line, width)...)
+// applyOutputs writes output produced in this session into the document, so
+// saving and pushing both carry what the cells printed.
+func (a *app) applyOutputs() {
+	if a.nb == nil {
+		return
 	}
-	if len(lines) == 0 {
-		lines = [][]highlight.Span{{{Style: highlight.Plain}}}
-	}
-
-	var outLines [][]highlight.Span
-	for _, ev := range outs {
-		for _, line := range outputSpans(ev) {
-			outLines = append(outLines, wrapSpans(line, width)...)
+	for i := 0; i < len(a.nb.Cells); i++ {
+		outs, ok := a.outputs[i]
+		if !ok || len(outs) == 0 || a.nb.Cells[i].Type != "code" {
+			continue
 		}
+		a.nb.SetCellOutputs(i, ipynbOutputs(outs))
 	}
-
-	height := len(lines) + 2
-	if len(outLines) > 0 {
-		height += len(outLines) + 1
-	}
-	return card{cell: index, tag: c.Tag(), state: state, lines: lines, outs: outLines, height: height}
 }
 
-func wrapSpans(spans []highlight.Span, width int) [][]highlight.Span {
-	if width <= 0 {
-		return nil
-	}
-	var out [][]highlight.Span
-	var cur []highlight.Span
-	used := 0
-	flush := func() {
-		out = append(out, cur)
-		cur, used = nil, 0
-	}
-
-	for _, span := range spans {
-		runes := []rune(sanitize(span.Text))
-		for len(runes) > 0 {
-			room := width - used
-			if room <= 0 {
-				flush()
-				continue
-			}
-			if len(runes) <= room {
-				cur = append(cur, highlight.Span{Text: string(runes), Style: span.Style})
-				used += len(runes)
-				break
-			}
-			cur = append(cur, highlight.Span{Text: string(runes[:room]), Style: span.Style})
-			runes = runes[room:]
-			flush()
-		}
-	}
-	if len(cur) > 0 || len(out) == 0 {
-		out = append(out, cur)
-	}
-	return out
-}
-
+// layout is the screen geometry shared by both views: the cell stream area on
+// the detail screen, and the status and help rows.
 type layout struct {
-	w, h               int
-	boxTop, boxBottom  int
-	listX, listW       int
-	bodyX, bodyW       int
-	innerTop, bodyTop  int
-	listRows, bodyRows int
+	w, h              int
+	bodyTop, bodyRows int
+	bodyX, bodyW      int
+	statusY, helpY    int
+	listTop, listRows int
 }
 
 func (a *app) layout() layout {
 	h, w := a.scr.MaxYX()
-	listW := clamp(w/3, 26, 46)
 	return layout{
 		w: w, h: h,
-		boxTop: 1, boxBottom: h - 3,
-		listX: 0, listW: listW,
-		bodyX: listW + 1, bodyW: max(w-listW-2, 1),
-		innerTop: 2, listRows: max(h-5, 1),
 		bodyTop: 1, bodyRows: max(h-3, 1),
+		bodyX: 0, bodyW: max(w-1, 1),
+		statusY: h - 2, helpY: h - 1,
+		listTop: 4, listRows: max(h-6, 1),
 	}
 }
 
@@ -490,23 +463,45 @@ func (a *app) draw() {
 		return
 	}
 
-	a.noff = scrollInto(a.nsel, a.noff, l.listRows, len(a.nbs))
-	if a.nb != nil && len(a.cards) > 0 {
+	if a.view == viewDetail && a.nb != nil && len(a.cards) > 0 {
 		a.ctop = a.scrollFor(l.bodyRows)
 	}
+	a.noff = scrollInto(a.nsel, a.noff, l.listRows, len(a.nbs))
+
 	if a.forceClear || a.ctop != a.lastCtop || a.noff != a.lastNoff {
 		a.scr.ClearOk(true)
 		a.forceClear = false
 		a.lastCtop, a.lastNoff = a.ctop, a.noff
 	}
 
-	a.drawLogin(l)
-	boxH := l.boxBottom - l.boxTop + 1
-	a.panel(l.listX, l.boxTop, l.listW, boxH, fmt.Sprintf("Notebooks (%d)", len(a.nbs)), a.where == focusNotebooks)
-	a.drawNotebooks(l)
-	a.drawBody(l)
+	if a.view == viewList {
+		a.drawList(l)
+	} else {
+		a.drawDetail(l)
+	}
 	a.drawStatus(l)
 	a.scr.Refresh()
+}
+
+func (a *app) drawStatus(l layout) {
+	right := ""
+	if a.jup != nil {
+		right = "connected: " + a.jup.label()
+	}
+	msgWidth := l.w - 2
+	if right != "" && len(right)+2 < msgWidth {
+		a.put(l.statusY, l.w-2-len(right), l.w-2, right, a.th.dim, false)
+		msgWidth = l.w - 4 - len(right)
+	}
+
+	msg := a.status
+	if msg == "" && a.view == viewDetail && a.nb != nil && a.nb.Dirty() > 0 {
+		msg = fmt.Sprintf("%d cells edited - P pushes a version, w writes a local copy", a.nb.Dirty())
+	}
+	if msg != "" {
+		a.put(l.statusY, 1, msgWidth, msg, a.th.plain, false)
+	}
+	a.put(l.helpY, 1, l.w-2, helpFor(a.view), a.th.dim, false)
 }
 
 func (a *app) drawLogin(l layout) {
@@ -570,133 +565,16 @@ func (a *app) midline(y, x, width int, attr goncurses.Char) {
 	a.scr.AttrSet(goncurses.A_NORMAL)
 }
 
-func (a *app) drawNotebooks(l layout) {
-	x, width, top, rows := l.listX+1, l.listW-2, l.innerTop, l.listRows
-
-	for i := 0; i < rows; i++ {
-		idx := a.noff + i
-		if idx >= len(a.nbs) {
-			break
-		}
-		k := a.nbs[idx]
-		attr, mark := a.th.plain, "  "
-		if idx == a.nsel && a.where == focusNotebooks {
-			attr, mark = a.th.sel, "> "
-		}
-
-		a.put(top+i, x, width-11, mark+k.Title, attr, false)
-		if t := k.LastRunTime(); !t.IsZero() {
-			a.put(top+i, x+width-10, 10, t.Format("2006-01-02"), a.th.dim, false)
-		}
-	}
-}
-
-func (a *app) drawBody(l layout) {
-	x, width, top, rows := l.bodyX, l.bodyW, l.bodyTop, l.bodyRows
-
-	if a.nb == nil {
-		a.put(top, x+1, width-1, "select a notebook and press enter", a.th.dim, false)
+// ruleRow draws a full-width hairline.
+func (a *app) ruleRow(y, width int, attr goncurses.Char) {
+	if width <= 0 {
 		return
 	}
-	if len(a.cards) == 0 {
-		a.put(top, x+1, width-1, "this notebook has no cells", a.th.dim, false)
-		return
+	a.scr.AttrSet(attr)
+	for col := 0; col < width-1; col++ {
+		a.scr.MoveAddChar(y, col, goncurses.ACS_HLINE)
 	}
-
-	y := top - a.ctop
-	for _, c := range a.cards {
-		if y > top+rows {
-			break
-		}
-		a.drawCard(x, y, width, c, c.cell == a.csel && a.where == focusCells, top, top+rows-1)
-		y += c.height
-	}
-}
-
-// scrollFor keeps the selected card in view unless the user scrolled it away.
-func (a *app) scrollFor(rows int) int {
-	start, height := 0, 0
-	for i, c := range a.cards {
-		if i == a.csel {
-			height = c.height
-			break
-		}
-		start += c.height
-	}
-
-	if a.selMove {
-		a.selMove = false
-		if height <= rows {
-			if a.ctop > start {
-				a.ctop = start
-			}
-			if a.ctop+rows < start+height {
-				a.ctop = start + height - rows
-			}
-		} else {
-			a.ctop = start
-		}
-	} else {
-		if start+height <= a.ctop {
-			a.ctop = start
-		}
-		if start >= a.ctop+rows {
-			a.ctop = start
-		}
-	}
-
-	total := 0
-	for _, c := range a.cards {
-		total += c.height
-	}
-	return clamp(a.ctop, 0, max(total-rows, 0))
-}
-
-func (a *app) drawCard(x, y, width int, c card, selected bool, clipTop, clipBottom int) {
-	border, label := a.th.border, a.th.dim
-	if selected {
-		border, label = a.th.focusBorder, a.th.label
-	}
-	bottom := y + c.height - 1
-
-	if y >= clipTop && y <= clipBottom {
-		a.hline(y, x, width, border, goncurses.ACS_ULCORNER, goncurses.ACS_URCORNER)
-		title := fmt.Sprintf(" %d %s ", c.cell+1, c.tag)
-		if c.state != "" {
-			title = fmt.Sprintf(" %d %s - %s ", c.cell+1, c.tag, c.state)
-		}
-		a.put(y, x+2, width-4, title, label, false)
-	}
-	if bottom >= clipTop && bottom <= clipBottom {
-		a.hline(bottom, x, width, border, goncurses.ACS_LLCORNER, goncurses.ACS_LRCORNER)
-	}
-
-	row := y + 1
-	for _, spans := range c.lines {
-		a.cardRow(row, x, width, border, spans, clipTop, clipBottom)
-		row++
-	}
-	if len(c.outs) > 0 {
-		if row >= clipTop && row <= clipBottom {
-			a.midline(row, x, width, border)
-		}
-		row++
-		for _, spans := range c.outs {
-			a.cardRow(row, x, width, border, spans, clipTop, clipBottom)
-			row++
-		}
-	}
-}
-
-func (a *app) cardRow(row, x, width int, border goncurses.Char, spans []highlight.Span, clipTop, clipBottom int) {
-	if row < clipTop || row > clipBottom {
-		return
-	}
-	a.scr.AttrSet(border)
-	a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
-	a.scr.MoveAddChar(row, x+width-1, goncurses.ACS_VLINE)
 	a.scr.AttrSet(goncurses.A_NORMAL)
-	a.putSpans(row, x+2, width-4, spans)
 }
 
 func (a *app) putSpans(y, x, width int, spans []highlight.Span) {
@@ -715,26 +593,6 @@ func (a *app) putSpans(y, x, width int, spans []highlight.Span) {
 		cx += len([]rune(text))
 	}
 	a.scr.AttrSet(goncurses.A_NORMAL)
-}
-
-func (a *app) drawStatus(l layout) {
-	right := ""
-	if a.jup != nil {
-		right = "connected: " + a.jup.label()
-	}
-	msgWidth := l.w - 2
-	if right != "" && len(right)+2 < msgWidth {
-		a.put(l.h-2, l.w-2-len(right), l.w-2, right, a.th.dim, false)
-		msgWidth = l.w - 4 - len(right)
-	}
-	msg := a.status
-	if msg == "" && a.nb != nil && a.nb.Dirty() > 0 {
-		msg = fmt.Sprintf("%d cells edited - P pushes a version, w writes a local copy", a.nb.Dirty())
-	}
-	if msg != "" {
-		a.put(l.h-2, 1, msgWidth, msg, a.th.plain, false)
-	}
-	a.put(l.h-1, 1, l.w-2, helpLine, a.th.dim, false)
 }
 
 func (a *app) put(y, x, width int, s string, attr goncurses.Char, fill bool) {
@@ -794,6 +652,14 @@ func truncate(s string, n int) string {
 	return string(r[:n-1]) + "~"
 }
 
+func pad(s string, width int) string {
+	r := []rune(sanitize(s))
+	if len(r) > width {
+		return truncate(s, width)
+	}
+	return string(r) + strings.Repeat(" ", width-len(r))
+}
+
 func clamp(v, lo, hi int) int {
 	if v < lo {
 		return lo
@@ -838,4 +704,9 @@ func scrollInto(sel, off, height, n int) int {
 	return clamp(off, 0, maxOff)
 }
 
-var _ = context.CancelFunc(nil)
+func helpFor(v view) string {
+	if v == viewList {
+		return "j/k move  enter open  a new  o open in browser  n more  q quit"
+	}
+	return "j/k move  J/K scroll  enter edit  R run  a/m add  d del  P push  esc back  q quit"
+}
