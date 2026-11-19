@@ -118,9 +118,9 @@ func (a *app) handle(ch goncurses.Key) bool {
 	case 'K':
 		a.scroll(-1)
 	case goncurses.KEY_PAGEDOWN:
-		a.scroll(a.layout().innerRows / 2)
+		a.scroll(a.layout().bodyRows / 2)
 	case goncurses.KEY_PAGEUP:
-		a.scroll(-a.layout().innerRows / 2)
+		a.scroll(-a.layout().bodyRows / 2)
 	case '\t', 'l', goncurses.KEY_RIGHT:
 		a.where = focusCells
 	case goncurses.KEY_BTAB, 'h', goncurses.KEY_LEFT:
@@ -174,7 +174,7 @@ func (a *app) scroll(delta int) {
 	for _, c := range a.cards {
 		total += c.height
 	}
-	max := total - a.layout().innerRows
+	max := total - a.layout().bodyRows
 	if max < 0 {
 		max = 0
 	}
@@ -349,11 +349,12 @@ func wrapSpans(spans []highlight.Span, width int) [][]highlight.Span {
 }
 
 type layout struct {
-	w, h                int
-	boxTop, boxBottom   int
-	listX, listW        int
-	bodyX, bodyW        int
-	innerTop, innerRows int
+	w, h               int
+	boxTop, boxBottom  int
+	listX, listW       int
+	bodyX, bodyW       int
+	innerTop, bodyTop  int
+	listRows, bodyRows int
 }
 
 func (a *app) layout() layout {
@@ -364,7 +365,8 @@ func (a *app) layout() layout {
 		boxTop: 1, boxBottom: h - 3,
 		listX: 0, listW: listW,
 		bodyX: listW + 1, bodyW: w - listW - 1,
-		innerTop: 2, innerRows: max(h-5, 1),
+		innerTop: 2, listRows: max(h-5, 1),
+		bodyTop: 1, bodyRows: max(h-3, 1),
 	}
 }
 
@@ -381,7 +383,6 @@ func (a *app) draw() {
 	a.drawLogin(l)
 	boxH := l.boxBottom - l.boxTop + 1
 	a.panel(l.listX, l.boxTop, l.listW, boxH, fmt.Sprintf("Notebooks (%d)", len(a.nbs)), a.where == focusNotebooks)
-	a.panel(l.bodyX, l.boxTop, l.bodyW, boxH, a.bodyLabel(), a.where == focusCells)
 	a.drawNotebooks(l)
 	a.drawBody(l)
 	a.drawStatus(l)
@@ -396,20 +397,6 @@ func (a *app) drawLogin(l layout) {
 	}
 	a.put(0, 1, l.w-1, prefix, a.th.dim, false)
 	a.put(0, 1+len(prefix), l.w-1-len(prefix), name, a.th.label, false)
-}
-
-func (a *app) bodyLabel() string {
-	if a.nb == nil {
-		return "Cells"
-	}
-	label := fmt.Sprintf("Cells (%d)", len(a.nb.Cells))
-	if a.nb.Title != "" {
-		label += " - " + a.nb.Title
-	}
-	if n := a.nb.Dirty(); n > 0 {
-		label += fmt.Sprintf(" - %d edited", n)
-	}
-	return label
 }
 
 // panel draws a box with its label sitting in the top border.
@@ -451,7 +438,7 @@ func (a *app) hline(y, x, width int, attr goncurses.Char, left, right goncurses.
 }
 
 func (a *app) drawNotebooks(l layout) {
-	x, width, top, rows := l.listX+1, l.listW-2, l.innerTop, l.innerRows
+	x, width, top, rows := l.listX+1, l.listW-2, l.innerTop, l.listRows
 	a.noff = scrollInto(a.nsel, a.noff, rows, len(a.nbs))
 
 	for i := 0; i < rows; i++ {
@@ -465,11 +452,7 @@ func (a *app) drawNotebooks(l layout) {
 			attr, mark = a.th.sel, "> "
 		}
 
-		row := mark + k.Title
-		if b := k.Badges(); b != "" {
-			row += "  " + b
-		}
-		a.put(top+i, x, width-11, row, attr, false)
+		a.put(top+i, x, width-11, mark+k.Title, attr, false)
 		if t := k.LastRunTime(); !t.IsZero() {
 			a.put(top+i, x+width-10, 10, t.Format("2006-01-02"), a.th.dim, false)
 		}
@@ -477,14 +460,14 @@ func (a *app) drawNotebooks(l layout) {
 }
 
 func (a *app) drawBody(l layout) {
-	x, width, top, rows := l.bodyX+1, l.bodyW-2, l.innerTop, l.innerRows
+	x, width, top, rows := l.bodyX, l.bodyW, l.bodyTop, l.bodyRows
 
 	if a.nb == nil {
-		a.put(top, x, width, "select a notebook and press enter", a.th.dim, false)
+		a.put(top, x+1, width-1, "select a notebook and press enter", a.th.dim, false)
 		return
 	}
 	if len(a.cards) == 0 {
-		a.put(top, x, width, "this notebook has no cells", a.th.dim, false)
+		a.put(top, x+1, width-1, "this notebook has no cells", a.th.dim, false)
 		return
 	}
 
@@ -562,7 +545,7 @@ func (a *app) drawCard(x, y, width int, c card, selected bool, clipTop, clipBott
 		a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
 		a.scr.MoveAddChar(row, x+width-1, goncurses.ACS_VLINE)
 		a.scr.AttrSet(goncurses.A_NORMAL)
-		a.putSpans(row, x+1, width-2, spans)
+		a.putSpans(row, x+2, width-4, spans)
 	}
 }
 

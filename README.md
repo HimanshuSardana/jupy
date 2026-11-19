@@ -4,15 +4,17 @@ A small ncurses browser for Kaggle notebooks: list your notebooks, open one to
 see its cells, and edit a cell in `$VISUAL` / `$EDITOR` (nvim by default).
 
 ```
-jupy  @you  Titanic EDA                      Notebooks (40) | Cells (5)
- titanic-eda      2026-11-19 |    1 py  import torch
- j-bjev           2026-11-04 | *  2 py  from torch.optim import Adam
- notebooke38a2    2026-10-09 |    3 py  from pathlib import Path
-                             | Cell 2 of 5 - code
-                             | from torch.optim import Adam
-                             | loss_fn = nn.CrossEntropyLoss()
- cell 2 updated in the buffer - w writes a .ipynb copy
- j/k move  tab pane  enter open  e edit in nvim  r reload  n more  w save  q quit
+logged in as: you
+┌ Notebooks (40) ───────────┐ ┌ 1 py ────────────────────────────────┐
+│   notebook72cbd09a56 11-19│ │ import torch                         │
+│ > J*bJev             11-04│ │ import torch.nn as nn                │
+│   notebooke38a2762d0 10-09│ └──────────────────────────────────────┘
+└───────────────────────────┘ ┌ 2 py ────────────────────────────────┐
+                              │ from torch.optim import Adam         │
+                              │ loss_fn = nn.CrossEntropyLoss()      │
+                              └──────────────────────────────────────┘
+ epoch baseline - 12 cells
+ j/k move  J/K scroll  tab pane  enter nvim  r reload  n more  w save  q quit
 ```
 
 ## Build
@@ -39,7 +41,7 @@ jupy notebook.ipynb [more...] # local files, no network
 | `tab`, `h` / `l` | switch pane |
 | `enter` | open notebook, or edit the selected cell |
 | `e` | edit the selected cell in the editor |
-| `J` / `K` | scroll the cell preview |
+| `J` / `K`, pgup/pgdn | scroll the cell stream |
 | `r` | reload the open notebook |
 | `n` | load the next page of notebooks |
 | `w` | write the notebook (with your edits) to `./<slug>.ipynb` |
@@ -59,10 +61,16 @@ Checked in this order:
 ## How editing works
 
 A cell's source is written to a temp file (`.py`, `.md`, `.R`, ... by cell type
-and notebook language), the terminal is handed to the editor, and the file is
-read back on exit. Edits live in memory and are marked `*` in the cell list;
-`w` saves an `.ipynb` copy locally. Nothing is pushed back to Kaggle — that
-needs a `kernels push` round trip that this tool does not implement.
+and notebook language). When the cell has outputs, the editor opens them in a
+vertical split — source left, output right (`nvim -O cell.py output.txt`); cells
+without outputs open on their own. The terminal is handed to the editor and the
+source is read back on exit, marked `edited` in the card label; `w` saves an
+`.ipynb` copy locally. Nothing is pushed back to Kaggle — that needs a
+`kernels push` round trip that this tool does not implement.
+
+The TUI is drawn with narrow ncurses, which counts bytes rather than cells, so
+sanitised text folds non-ASCII runes to `?`; box borders use the terminal's ACS
+line-drawing characters instead of UTF-8 box glyphs for the same reason.
 
 ## API notes
 
