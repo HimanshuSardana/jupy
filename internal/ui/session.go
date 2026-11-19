@@ -456,7 +456,7 @@ func (a *app) prompt(label string) (string, bool) {
 		if len(r) > width {
 			r = r[len(r)-width:]
 		}
-		a.put(row, 0, l.w-1, string(r)+" ", a.th.label, false)
+		a.put(row, 0, l.w, string(r)+" ", a.th.label, true)
 		a.scr.Refresh()
 
 		ch := a.scr.GetChar()
