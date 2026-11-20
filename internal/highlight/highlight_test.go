@@ -21,6 +21,10 @@ func stylesOf(spans []Span) map[string]Style {
 	return out
 }
 
+func needsNoHash(spans []Span) bool {
+	return join(spans) == "Title **bold**"
+}
+
 func TestPythonLineKeepsTextIntact(t *testing.T) {
 	src := `def train(model, lr=1e-3):  # comment with 'quote'` + "\n" + `    x = "hi # not a comment"` + "\n" + `    return {"k": 2}`
 	lines := Lines(src, "python")
@@ -86,8 +90,8 @@ func TestMarkdown(t *testing.T) {
 	src := "# Title **bold**\n\n- item with `code`\n\n```python\nx = 1\n```"
 	lines := Lines(src, "markdown")
 
-	if lines[0][0].Style != Heading {
-		t.Errorf("heading style = %v", lines[0][0].Style)
+	if lines[0][0].Style != Heading || needsNoHash(lines[0]) != true {
+		t.Errorf("heading = %v", lines[0])
 	}
 	if len(lines[1]) != 0 {
 		t.Errorf("blank line = %v", lines[1])
@@ -96,28 +100,28 @@ func TestMarkdown(t *testing.T) {
 	if bullet[0].Text != "-" || bullet[0].Style != Bullet {
 		t.Errorf("bullet = %+v", bullet[0])
 	}
-	if got := join(bullet); got != "- item with `code`" {
+	if got := join(bullet); got != "- item with code" {
 		t.Errorf("bullet text = %q", got)
 	}
-	if stylesOf(bullet)["`code`"] != Code {
+	if stylesOf(bullet)["code"] != Code {
 		t.Errorf("inline code = %v", stylesOf(bullet))
 	}
 
-	if lines[4][0].Style != Code || lines[5][0].Style != Code {
-		t.Errorf("fence styles = %v %v", lines[4][0].Style, lines[5][0].Style)
+	if lines[4] != nil {
+		t.Errorf("fence marker should not render: %v", lines[4])
+	}
+	if lines[5][0].Style != Code || lines[5][0].Text != "x = 1" {
+		t.Errorf("fenced body = %v", lines[5])
 	}
 }
 
 func TestMarkdownEmphasisAndLink(t *testing.T) {
 	spans := Lines("a **bold** b [docs](https://x.y)", "markdown")[0]
 	styles := stylesOf(spans)
-	if styles["**bold**"] != Emphasis {
+	if styles["bold"] != Emphasis {
 		t.Errorf("emphasis = %v", styles)
 	}
-	if styles["(https://x.y)"] != Code {
-		t.Errorf("link target = %v", styles)
-	}
-	if got := join(spans); got != "a **bold** b [docs](https://x.y)" {
+	if got := join(spans); got != "a bold b docs" {
 		t.Errorf("text = %q", got)
 	}
 }

@@ -46,10 +46,10 @@ const (
 )
 
 // card is one cell rendered as a box: source, then its output when it has any.
+// card is one cell rendered as prose: its source lines, then its output,
+// with no box around them.
 type card struct {
 	cell   int
-	tag    string
-	state  string
 	lines  [][]highlight.Span
 	outs   [][]highlight.Span
 	height int
@@ -354,11 +354,7 @@ func (a *app) buildCards() {
 		width = 8
 	}
 	for i, c := range a.nb.Cells {
-		state := ""
-		if i == a.running {
-			state = "running"
-		}
-		a.cards = append(a.cards, newCard(i, c, a.kind(c), width, a.outputs[i], state))
+		a.cards = append(a.cards, newCard(i, c, a.kind(c), width, a.outputs[i]))
 	}
 }
 
@@ -443,7 +439,7 @@ func (a *app) save() {
 	a.status = "wrote " + name
 }
 
-func newCard(index int, c notebook.Cell, kind string, width int, outs []jupyter.Event, state string) card {
+func newCard(index int, c notebook.Cell, kind string, width int, outs []jupyter.Event) card {
 	logical := highlight.Lines(c.Source, kind)
 	var lines [][]highlight.Span
 	for _, line := range logical {
@@ -460,11 +456,12 @@ func newCard(index int, c notebook.Cell, kind string, width int, outs []jupyter.
 		}
 	}
 
-	height := len(lines) + 2
+	height := len(lines)
 	if len(outLines) > 0 {
+		// a blank row separates the output from the prose above it
 		height += len(outLines) + 1
 	}
-	return card{cell: index, tag: c.Tag(), state: state, lines: lines, outs: outLines, height: height}
+	return card{cell: index, lines: lines, outs: outLines, height: height}
 }
 
 func wrapSpans(spans []highlight.Span, width int) [][]highlight.Span {
@@ -518,8 +515,8 @@ type layout struct {
 const (
 	cardMargin  = 3
 	cardMeasure = 108
-	cardPadding = 2
 	cardGap     = 1
+	blockGutter = 3
 )
 
 func (a *app) layout() layout {
@@ -542,7 +539,7 @@ func (a *app) layout() layout {
 		listX: 0, listW: listW,
 		bodyX: bodyX, bodyW: bodyW,
 		cardX: cardX, cardW: cardW,
-		contentW: cardW - 2 - 2*cardPadding,
+		contentW: cardW - blockGutter,
 		innerTop: 2, listRows: max(h-5, 1),
 		bodyTop: 1, bodyRows: max(h-3, 1),
 	}
@@ -677,8 +674,43 @@ func (a *app) drawBody(l layout) {
 		if y > top+rows {
 			break
 		}
-		a.drawCard(x, y, width, c, c.cell == a.csel && a.where == focusCells, top, top+rows-1)
+		a.drawBlock(x, y, width, c, c.cell == a.csel && a.where == focusCells, top, top+rows-1)
 		y += c.height + cardGap
+	}
+}
+
+// drawBlock prints one cell as prose. The selected cell gets a bar down its left
+// edge; nothing else marks where a cell starts or ends.
+func (a *app) drawBlock(x, y, width int, c card, selected bool, clipTop, clipBottom int) {
+	textX, textW := x+blockGutter, max(width-blockGutter, 1)
+
+	bar := func(row int) {
+		if !selected || row < clipTop || row > clipBottom {
+			return
+		}
+		a.scr.AttrSet(a.th.focusBorder)
+		a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
+		a.scr.AttrSet(goncurses.A_NORMAL)
+	}
+
+	row := y
+	for _, spans := range c.lines {
+		if row >= clipTop && row <= clipBottom {
+			bar(row)
+			a.putSpans(row, textX, textW, spans)
+		}
+		row++
+	}
+	if len(c.outs) > 0 {
+		bar(row) // the blank line before the output, so the edge is unbroken
+		row++
+		for _, spans := range c.outs {
+			if row >= clipTop && row <= clipBottom {
+				bar(row)
+				a.putSpans(row, textX, textW, spans)
+			}
+			row++
+		}
 	}
 }
 
@@ -719,53 +751,6 @@ func (a *app) scrollFor(rows int) int {
 		total += c.height + cardGap
 	}
 	return clamp(a.ctop, 0, max(total-rows, 0))
-}
-
-func (a *app) drawCard(x, y, width int, c card, selected bool, clipTop, clipBottom int) {
-	border, label := a.th.border, a.th.dim
-	if selected {
-		border, label = a.th.focusBorder, a.th.label
-	}
-	bottom := y + c.height - 1
-
-	if y >= clipTop && y <= clipBottom {
-		a.hline(y, x, width, border, goncurses.ACS_ULCORNER, goncurses.ACS_URCORNER)
-		title := fmt.Sprintf(" %d %s ", c.cell+1, c.tag)
-		if c.state != "" {
-			title = fmt.Sprintf(" %d %s - %s ", c.cell+1, c.tag, c.state)
-		}
-		a.put(y, x+1+cardPadding, width-2-2*cardPadding, title, label, false)
-	}
-	if bottom >= clipTop && bottom <= clipBottom {
-		a.hline(bottom, x, width, border, goncurses.ACS_LLCORNER, goncurses.ACS_LRCORNER)
-	}
-
-	row := y + 1
-	for _, spans := range c.lines {
-		a.cardRow(row, x, width, border, spans, clipTop, clipBottom)
-		row++
-	}
-	if len(c.outs) > 0 {
-		if row >= clipTop && row <= clipBottom {
-			a.midline(row, x, width, border)
-		}
-		row++
-		for _, spans := range c.outs {
-			a.cardRow(row, x, width, border, spans, clipTop, clipBottom)
-			row++
-		}
-	}
-}
-
-func (a *app) cardRow(row, x, width int, border goncurses.Char, spans []highlight.Span, clipTop, clipBottom int) {
-	if row < clipTop || row > clipBottom {
-		return
-	}
-	a.scr.AttrSet(border)
-	a.scr.MoveAddChar(row, x, goncurses.ACS_VLINE)
-	a.scr.MoveAddChar(row, x+width-1, goncurses.ACS_VLINE)
-	a.scr.AttrSet(goncurses.A_NORMAL)
-	a.putSpans(row, x+1+cardPadding, width-2-2*cardPadding, spans)
 }
 
 func (a *app) putSpans(y, x, width int, spans []highlight.Span) {
