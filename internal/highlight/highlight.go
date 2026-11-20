@@ -175,8 +175,9 @@ func markdownLines(source string) [][]Span {
 		trimmed := strings.TrimLeft(line, " ")
 		indent := line[:len(line)-len(trimmed)]
 
+		// fences are structure, not prose: they disappear, their body stays
 		if strings.HasPrefix(trimmed, "```") {
-			out[i] = []Span{{Text: line, Style: Code}}
+			out[i] = nil
 			inFence = !inFence
 			continue
 		}
@@ -184,8 +185,8 @@ func markdownLines(source string) [][]Span {
 			out[i] = []Span{{Text: line, Style: Code}}
 			continue
 		}
-		if strings.HasPrefix(trimmed, "#") && strings.HasPrefix(strings.TrimLeft(trimmed, "#"), " ") {
-			out[i] = []Span{{Text: line, Style: Heading}}
+		if hashes := strings.TrimLeft(trimmed, "#"); hashes != trimmed && strings.HasPrefix(hashes, " ") {
+			out[i] = []Span{{Text: strings.TrimLeft(hashes, " "), Style: Heading}}
 			continue
 		}
 		if trimmed == "" {
@@ -224,7 +225,7 @@ func inline(line string) []Span {
 		switch {
 		case line[i] == '`':
 			if j := strings.IndexByte(line[i+1:], '`'); j >= 0 {
-				add(line[i:i+j+2], Code)
+				add(line[i+1:i+1+j], Code)
 				i += j + 2
 				continue
 			}
@@ -233,7 +234,7 @@ func inline(line string) []Span {
 
 		case strings.HasPrefix(line[i:], "**"):
 			if j := strings.Index(line[i+2:], "**"); j >= 0 {
-				add(line[i:i+j+4], Emphasis)
+				add(line[i+2:i+2+j], Emphasis)
 				i += j + 4
 				continue
 			}
@@ -243,8 +244,8 @@ func inline(line string) []Span {
 		case strings.HasPrefix(line[i:], "["):
 			if j := strings.Index(line[i:], "]("); j >= 0 {
 				if k := strings.IndexByte(line[i+j:], ')'); k >= 0 {
-					add(line[i:i+j+1], Plain)
-					add(line[i+j+1:i+j+k+1], Code)
+					// keep the link text, drop the target
+					add(line[i+1:i+j], Plain)
 					i += j + k + 1
 					continue
 				}
